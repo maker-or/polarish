@@ -126,7 +126,15 @@ export const requestShape = Schema.Struct({
 // --- Unified response layer (see plan.md) ------------------------------------
 // Distinct from chat `StopReason` on messages — map at boundaries when projecting.
 
-/** Why generation ended in the unified API (not provider-specific strings). */
+/** Reason why a language model finished generating a response.
+Can be one of the following:
+- `stop`: the model generated a complete response
+- `length`: the model generated maximum number of tokens
+- `tool-call`: the model triggered tool calls
+- `content-filter`: content filter violation stopped the model
+- `error`: the model stopped because of an error
+- `abort`: the model was aborted by the user
+*/
 export const ResponseFinishReason = Schema.Literal(
   "stop",
   "length",
@@ -188,19 +196,13 @@ export const ResponseContentPart = Schema.Union(
 );
 
 /**
- * Curated provider-facing metadata (stable, safe-by-default).
- * Unstable provider blobs belong under `extensions`, not top-level ad hoc fields.
+ * Curated metadata exposed to callers (which provider, ids, model — safe, stable fields).
  */
 export const ProviderMetadata = Schema.Struct({
   provider: Provider,
   responseId: Schema.optional(Schema.String),
   messageId: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
-  /** High-level lifecycle / completion status when available (vendor-normalized string). */
-  status: Schema.optional(Schema.String),
-  extensions: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  ),
 });
 
 /**
@@ -217,6 +219,40 @@ export const UnifiedResponseSnapshot = Schema.Struct({
   finishReason: ResponseFinishReason,
   providerMetadata: ProviderMetadata,
   warnings: Schema.Array(Schema.String),
+});
+
+// --- Unified generate() result (see plan.md mode narrowing) -------------------
+
+/**
+ * Incremental chunk emitted while streaming (`textStream` / `objectStream`).
+ * Extend with new `kind` variants (tool, reasoning, …) as the remapper grows.
+ */
+export const UnifiedStreamChunk = Schema.Struct({
+  kind: Schema.Literal("text-delta"),
+  delta: Schema.String,
+});
+
+/**
+ * Non-streaming outcome: one snapshot after the full response is assembled.
+ * Main answer is `snapshot.text` and/or `snapshot.object` per request mode.
+ */
+export const UnifiedBatchResult = Schema.Struct({
+  stream: Schema.Literal(false),
+  snapshot: UnifiedResponseSnapshot,
+});
+
+/**
+ * Streaming outcome: live stream(s) + `final` promise for the complete snapshot.
+ * Streams use `Schema.Unknown` at the schema layer; use `UnifiedStreamingResult` for typing.
+ */
+export const UnifiedStreamingResult = Schema.Struct({
+  stream: Schema.Literal(true),
+  /** Plain text mode — delta chunks for UI. */
+  textStream: Schema.optional(Schema.Unknown),
+  /** Structured output mode — incremental validated JSON when enabled. */
+  objectStream: Schema.optional(Schema.Unknown),
+  /** Resolves to the same shape as `UnifiedBatchResult.snapshot`. */
+  final: Schema.Unknown,
 });
 
 export type Provider = typeof Provider.Type;
@@ -245,3 +281,22 @@ export type ResponseToolResultPart = typeof ResponseToolResultPart.Type;
 export type ResponseContentPart = typeof ResponseContentPart.Type;
 export type ProviderMetadata = typeof ProviderMetadata.Type;
 export type UnifiedResponseSnapshot = typeof UnifiedResponseSnapshot.Type;
+export type UnifiedStreamChunk = typeof UnifiedStreamChunk.Type;
+export type UnifiedBatchResult = typeof UnifiedBatchResult.Type;
+export type UnifiedStreamingResult = typeof UnifiedStreamingResult.Type;
+
+/**
+ * Typed view of {@link UnifiedStreamingResult}: `ReadableStream` + `Promise` instead of `Unknown`.
+ * Use at SDK boundaries; keep Schema structs for anything serializable.
+ */
+export type UnifiedStreamingHandles = {
+  readonly stream: true;
+  readonly textStream?: ReadableStream<UnifiedStreamChunk>;
+  readonly objectStream?: ReadableStream<unknown>;
+  readonly final: Promise<UnifiedResponseSnapshot>;
+};
+
+/** Discriminant union: `stream: false` batch vs `stream: true` streaming handles. */
+export type UnifiedGenerateResult =
+  | UnifiedBatchResult
+  | UnifiedStreamingHandles;

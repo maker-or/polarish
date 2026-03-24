@@ -22,6 +22,9 @@ export {
   ResponseContentPart,
   ProviderMetadata,
   UnifiedResponseSnapshot,
+  UnifiedStreamChunk,
+  UnifiedBatchResult,
+  UnifiedStreamingResult,
 } from "./types.ts";
 
 export type {
@@ -48,6 +51,11 @@ export type {
   ResponseContentPart as ResponseContentPartType,
   ProviderMetadata as ProviderMetadataType,
   UnifiedResponseSnapshot as UnifiedResponseSnapshotType,
+  UnifiedStreamChunk as UnifiedStreamChunkType,
+  UnifiedBatchResult as UnifiedBatchResultType,
+  UnifiedStreamingResult as UnifiedStreamingResultType,
+  UnifiedStreamingHandles,
+  UnifiedGenerateResult,
 } from "./types.ts";
 
 export {

@@ -29,13 +29,17 @@ export const imageInput = Schema.Struct({
 
 export const codexInputContent = Schema.Union(textInput, imageInput);
 
-/** Assistant turns in Codex Responses `input` must use `output_text` or `refusal`, not `input_*`. */
+/**
+ *  Assistant turns in Codex Responses `input` must use `output_text` or `refusal`, not `input_*`.
+ */
 export const assistantContentPart = Schema.Struct({
   type: Schema.Literal("output_text"),
   text: Schema.String,
 });
 
-// these usally represent input array that we send in the codex for different roles
+/**
+ *  these usally represent input array that we send in the codex for different roles
+ */
 const devloperMessagetype = Schema.Struct({
   role: Schema.Literal("developer"),
   content: Schema.String,
@@ -56,6 +60,10 @@ export const inputMessageType = Schema.Union(
   userMessageType,
   assistantMessageType,
 );
+
+/**
+ *  this are the model name that we need to use when sending requests to the codex APIs
+ */
 export const CodexModelId = Schema.Literal(
   "gpt-5.1",
   "gpt-5.1-codex-max",
@@ -67,7 +75,10 @@ export const CodexModelId = Schema.Literal(
   "gpt-5.4",
 );
 
-// this is the shape of the body that we send to the codex APIs
+
+/**
+ *  this is the shape of the body that we send to the codex APIs
+ */
 export const codexRequestShape = Schema.Struct({
   model: CodexModelId,
   instructions: Schema.String,
@@ -84,7 +95,9 @@ export const CodexReasoningSummary = Schema.Literal(
   "on",
 );
 
-// this is the codex specific type from the unified request api
+/**
+ *  this is the codex specific type from the unified request api
+ */
 export const appRequestShape = Schema.Struct({
   provider: Schema.Literal("openai-codex"),
   system: Schema.String,
