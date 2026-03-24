@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+:root {
+  font-family:
+    "Avenir Next", "Segoe UI Variable", "SF Pro Display", "Helvetica Neue",
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: #d2b6ef;
+  background: #16101d;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  background: #16101d;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #16101d;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+code {
+  font: inherit;
+}

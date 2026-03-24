@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "btca-cli": {
+      "source": "davis7dotsh/better-context",
+      "sourceType": "github",
+      "computedHash": "99bc5301f4f839a6f3be99d98955f32f1cd576c218731fa05fa54a003bd20e9b"
+    },
+    "emil-design-eng": {
+      "source": "emilkowalski/skill",
+      "sourceType": "github",
+      "computedHash": "32f63a1e56fc41f53497f7b19d6391b7c3e55bedd884c5a4d10bc4eacd2310e4"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "063a0e6448123cd359ad0044cc46b0e490cc7964d45ef4bb9fd842bd2ffbca67"
+    }
+  }
+}

@@ -1,0 +1,116 @@
+info:
+  name: openai-stream-tools
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: http://localhost:3000/api/v1/chat/completions
+  headers:
+    - name: Content-Type
+      value: application/json
+    - name: Authorization
+      value: Bearer {{process.env.OPENAI_API_KEY}}
+  body:
+    type: json
+    data: |-
+      {
+        "provider": "openai-codex",
+        "model": "{{OPENAI_MODEL}}",
+        "system": "You are a concise coding assistant. Use tools when appropriate.",
+        "stream": true,
+        "temperature": 0.2,
+        "maxRetries": 2,
+        "messages": [
+          {
+            "role": "user",
+            "content": "Read README.md for this repo.",
+            "timestamp": 1
+          },
+          {
+            "role": "assistant",
+            "content": [
+              { "type": "text", "text": "I'll read that file." },
+              { "type": "thinking", "thinking": "User wants README contents." },
+              {
+                "type": "toolcall",
+                "id": "call_bruno_tool_1",
+                "name": "read_file",
+                "arguments": { "path": "README.md" }
+              }
+            ],
+            "usage": {
+              "input": 20,
+              "output": 10,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 30,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "provider": "openai-codex",
+            "stopReason": "toolUse",
+            "timestamp": 2
+          },
+          {
+            "role": "tool",
+            "toolCallId": "call_bruno_tool_1",
+            "toolName": "read_file",
+            "content": [
+              { "type": "text", "text": "# Sample README\nBruno tool+stream integration test." }
+            ],
+            "isError": false,
+            "timestamp": 3
+          },
+          {
+            "role": "user",
+            "content": "Summarize the README in one short sentence.",
+            "timestamp": 4
+          }
+        ]
+      }
+  auth: inherit
+
+runtime:
+  variables:
+    - name: OPENAI_MODEL
+      value: gpt-5.4
+  scripts:
+    - type: tests
+      code: |-
+        function responseText() {
+          const raw = res.getBody();
+          if (typeof raw === "string") return raw;
+          if (raw && typeof raw === "object") return JSON.stringify(raw);
+          return String(raw ?? "");
+        }
+
+        function contentType() {
+          const h = res.headers || {};
+          return String(
+            h["content-type"] || h["Content-Type"] || h["CONTENT_TYPE"] || ""
+          ).toLowerCase();
+        }
+
+        test("should return 200", function () {
+          expect(res.status).to.equal(200);
+        });
+
+        test("should stream as text/event-stream with tool history", function () {
+          expect(contentType()).to.include("text/event-stream");
+        });
+
+        test("should include SSE data lines", function () {
+          expect(responseText()).to.include("data:");
+        });
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

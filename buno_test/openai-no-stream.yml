@@ -1,0 +1,65 @@
+info:
+  name: openai-no-stream-rejected
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: http://localhost:3000/api/v1/chat/completions
+  headers:
+    - name: Content-Type
+      value: application/json
+    - name: Authorization
+      value: Bearer {{process.env.OPENAI_API_KEY}}
+  body:
+    type: json
+    data: |-
+      {
+        "provider": "openai-codex",
+        "model": "{{OPENAI_MODEL}}",
+        "system": "You are a concise assistant. Reply with plain text only.",
+        "stream": false,
+        "temperature": 0.2,
+        "maxRetries": 2,
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply with exactly: non-streaming ok",
+            "timestamp": 1
+          }
+        ]
+      }
+  auth: inherit
+
+runtime:
+  variables:
+    - name: OPENAI_MODEL
+      value: gpt-5.4
+  scripts:
+    - type: tests
+      code: |-
+        function contentType() {
+          const h = res.headers || {};
+          return String(
+            h["content-type"] || h["Content-Type"] || h["CONTENT_TYPE"] || ""
+          ).toLowerCase();
+        }
+
+        test("should reject stream false before upstream (Codex requires streaming)", function () {
+          expect(res.status).to.equal(400);
+        });
+
+        test("should return JSON error body", function () {
+          expect(contentType()).to.include("application/json");
+          const body = res.getBody();
+          expect(body).to.be.an("object");
+          expect(body.error).to.be.an("object");
+          expect(body.error.message).to.include("stream");
+          expect(body.error.message).to.include("openai-codex");
+        });
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

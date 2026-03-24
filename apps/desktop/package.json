@@ -1,0 +1,62 @@
+{
+  "name": "desktop",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Electron desktop app powered by Bun, React, TypeScript, and Vite",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "dist": "bun run build && electron-builder",
+    "dist:dir": "bun run build && electron-builder --dir",
+    "lint": "biome check .",
+    "typecheck": "tsc -b",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.94.5",
+    "@workos-inc/authkit-react": "^0.16.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.4.7",
+    "effect": "^3.19.19",
+    "keytar": "^7.9.0",
+    "lucide-react": "^0.542.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.12",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "bun": "^1.0.0",
+    "electron": "^38.7.0",
+    "electron-builder": "^26.0.12",
+    "tailwindcss": "^4.1.12",
+    "vite": "^7.3.1",
+    "vite-plugin-electron": "^0.29.0"
+  },
+  "build": {
+    "appId": "dev.opencodetools.hax",
+    "productName": "Hax",
+    "directories": {
+      "output": "release"
+    },
+    "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "category": "Development",
+      "target": ["AppImage", "deb", "rpm"]
+    }
+  }
+}
