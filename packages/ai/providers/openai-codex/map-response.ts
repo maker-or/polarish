@@ -7,7 +7,7 @@ import type {
 	ResponseContentPart,
 	ResponseFinishReason,
 	ResponseTextPart,
-	UnifiedResponseSnapshot,
+	UnifiedResponse,
 	Usage,
 } from "../../types";
 
@@ -137,7 +137,7 @@ export function mapChunk(
 	}
 }
 
-export function toUnifiedSnapshot(acc: Accumulator): UnifiedResponseSnapshot {
+export function toUnifiedSnapshot(acc: Accumulator): UnifiedResponse {
 	const textParts: ResponseContentPart[] =
 		acc.text.length > 0
 			? [{ type: "text", text: acc.text } satisfies ResponseTextPart]
