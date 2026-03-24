@@ -209,7 +209,7 @@ export const ProviderMetadata = Schema.Struct({
  * Final snapshot from `final()` and non-streaming success paths.
  * For a given run, prefer `text` or `object` per mode; both may be absent on failure paths.
  */
-export const UnifiedResponseSnapshot = Schema.Struct({
+export const UnifiedResponse = Schema.Struct({
   text: Schema.optional(Schema.String),
   object: Schema.optional(Schema.Unknown),
   content: Schema.Array(ResponseContentPart),
@@ -221,39 +221,7 @@ export const UnifiedResponseSnapshot = Schema.Struct({
   warnings: Schema.Array(Schema.String),
 });
 
-// --- Unified generate() result (see plan.md mode narrowing) -------------------
 
-/**
- * Incremental chunk emitted while streaming (`textStream` / `objectStream`).
- * Extend with new `kind` variants (tool, reasoning, …) as the remapper grows.
- */
-export const UnifiedStreamChunk = Schema.Struct({
-  kind: Schema.Literal("text-delta"),
-  delta: Schema.String,
-});
-
-/**
- * Non-streaming outcome: one snapshot after the full response is assembled.
- * Main answer is `snapshot.text` and/or `snapshot.object` per request mode.
- */
-export const UnifiedBatchResult = Schema.Struct({
-  stream: Schema.Literal(false),
-  snapshot: UnifiedResponseSnapshot,
-});
-
-/**
- * Streaming outcome: live stream(s) + `final` promise for the complete snapshot.
- * Streams use `Schema.Unknown` at the schema layer; use `UnifiedStreamingResult` for typing.
- */
-export const UnifiedStreamingResult = Schema.Struct({
-  stream: Schema.Literal(true),
-  /** Plain text mode — delta chunks for UI. */
-  textStream: Schema.optional(Schema.Unknown),
-  /** Structured output mode — incremental validated JSON when enabled. */
-  objectStream: Schema.optional(Schema.Unknown),
-  /** Resolves to the same shape as `UnifiedBatchResult.snapshot`. */
-  final: Schema.Unknown,
-});
 
 export type Provider = typeof Provider.Type;
 export type Transport = typeof Transport.Type;
@@ -280,23 +248,4 @@ export type ResponseToolCallPart = typeof ResponseToolCallPart.Type;
 export type ResponseToolResultPart = typeof ResponseToolResultPart.Type;
 export type ResponseContentPart = typeof ResponseContentPart.Type;
 export type ProviderMetadata = typeof ProviderMetadata.Type;
-export type UnifiedResponseSnapshot = typeof UnifiedResponseSnapshot.Type;
-export type UnifiedStreamChunk = typeof UnifiedStreamChunk.Type;
-export type UnifiedBatchResult = typeof UnifiedBatchResult.Type;
-export type UnifiedStreamingResult = typeof UnifiedStreamingResult.Type;
-
-/**
- * Typed view of {@link UnifiedStreamingResult}: `ReadableStream` + `Promise` instead of `Unknown`.
- * Use at SDK boundaries; keep Schema structs for anything serializable.
- */
-export type UnifiedStreamingHandles = {
-  readonly stream: true;
-  readonly textStream?: ReadableStream<UnifiedStreamChunk>;
-  readonly objectStream?: ReadableStream<unknown>;
-  readonly final: Promise<UnifiedResponseSnapshot>;
-};
-
-/** Discriminant union: `stream: false` batch vs `stream: true` streaming handles. */
-export type UnifiedGenerateResult =
-  | UnifiedBatchResult
-  | UnifiedStreamingHandles;
+export type UnifiedResponse = typeof UnifiedResponse.Type;
