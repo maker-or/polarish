@@ -216,8 +216,8 @@ export const UnifiedResponse = Schema.Struct({
   toolCalls: Schema.Array(NormalizedToolCall),
   toolResults: Schema.Array(NormalizedToolResult),
   usage: Schema.optional(Usage),
-  finishReason: ResponseFinishReason,
-  providerMetadata: ProviderMetadata,
+  finishReason: Schema.optional(ResponseFinishReason),
+  providerMetadata: Schema.optional(ProviderMetadata),
   warnings: Schema.Array(Schema.String),
 });
 

@@ -303,15 +303,6 @@ function resolveBody(
     context.providerHost = new URL(model.baseUrl).host;
     context.stream = request.stream;
 
-    if (request.provider === "openai-codex" && request.stream === false) {
-      yield* Effect.fail(
-        new BodyParseError({
-          message:
-            "openai-codex requires stream: true (the upstream Codex Responses API rejects stream: false)",
-        }),
-      );
-    }
-
     span.setAttribute("machine.model_id", request.model);
     span.setAttribute("machine.provider", request.provider);
     span.setAttribute("machine.provider_host", context.providerHost);

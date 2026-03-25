@@ -111,6 +111,8 @@ export function mapChunk(
 			return state;
 		case "response.output_text.delta":
 			return { ...state, text: state.text + event.delta };
+		case "response.output_text.done":
+			return state;
 		case "response.content_part.done":
 			return state;
 		case "response.output_item.done":
