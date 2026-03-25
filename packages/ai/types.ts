@@ -1,4 +1,6 @@
-import { Schema } from "effect";
+import { Schema , Stream } from "effect";
+import { stream } from "effect/FastCheck";
+
 
 export const Provider = Schema.Literal(
   "openai-codex",
@@ -221,6 +223,20 @@ export const UnifiedResponse = Schema.Struct({
   warnings: Schema.Array(Schema.String),
 });
 
+
+export type UnifiedStreamingResult = {
+  readonly stream: true;
+  readonly textStream?: ReadableStream<string>;
+  readonly objectStream?: ReadableStream<unknown>;
+  final(): Promise<UnifiedResponse>;
+};
+export type UnifiedBatchResult = {
+  readonly stream: false;
+  readonly response: UnifiedResponse;
+};
+export type UnifiedGenerateResult =
+  | UnifiedBatchResult
+  | UnifiedStreamingResult;
 
 
 export type Provider = typeof Provider.Type;
