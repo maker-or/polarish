@@ -4,16 +4,28 @@ import { Authenticated, useAction, useQuery } from "convex/react";
 import {
 	AlertTriangle,
 	ArrowLeft,
+	CornerDownLeft,
 	Loader2,
-	Plus,
-	Terminal,
-	Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
+import { cx, r } from "../../../_classes";
+import { GsapPressLink } from "../../../gsap-press-link";
+
+function tryNormalizeOrigin(raw: string): string | null {
+	const s = raw.trim();
+	if (!s) return null;
+	try {
+		const url = new URL(s.includes("://") ? s : `https://${s}`);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+		return url.origin;
+	} catch {
+		return null;
+	}
+}
 
 export default function AppSettingsPage() {
 	return (
@@ -36,7 +48,7 @@ function AppSettingsView() {
 	const deleteApp = useAction((api as any).console.deleteApp);
 
 	const [name, setName] = useState("");
-	const [description, setDescription] = useState("");
+	const [domains, setDomains] = useState<string[]>([""]);
 	const [redirectUris, setRedirectUris] = useState<string[]>([""]);
 	const [isSaving, setIsSaving] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
@@ -56,22 +68,28 @@ function AppSettingsView() {
 		};
 	}, []);
 
-	// Initialise form from loaded app
 	useEffect(() => {
 		if (!app) return;
 		const typedApp = app as {
 			name: string;
-			description?: string;
+			domains: string[];
 			redirectUri: Array<{ uri: string; default: boolean }>;
 		};
 		setName(typedApp.name);
-		setDescription(typedApp.description ?? "");
+		const d = typedApp.domains ?? [];
+		setDomains(d.length > 0 ? d : [""]);
 		setRedirectUris(
 			typedApp.redirectUri.length > 0
-				? typedApp.redirectUri.map((r) => r.uri)
+				? typedApp.redirectUri.map((u) => u.uri)
 				: [""],
 		);
 	}, [app]);
+
+	const addDomain = () => setDomains((prev) => [...prev, ""]);
+	const removeDomain = (i: number) =>
+		setDomains((prev) => prev.filter((_, idx) => idx !== i));
+	const updateDomain = (i: number, val: string) =>
+		setDomains((prev) => prev.map((u, idx) => (idx === i ? val : u)));
 
 	const addUri = () => setRedirectUris((prev) => [...prev, ""]);
 	const removeUri = (i: number) =>
@@ -86,6 +104,23 @@ function AppSettingsView() {
 			setError("App name is required.");
 			return;
 		}
+		const domainTokens = domains.map((d) => d.trim()).filter(Boolean);
+		for (const d of domainTokens) {
+			if (!tryNormalizeOrigin(d)) {
+				setError(`Invalid domain or origin: ${d}`);
+				return;
+			}
+		}
+		const normalizedDomains = domainTokens
+			.map((d) => tryNormalizeOrigin(d))
+			.filter((x): x is string => x !== null);
+		const seen = new Set<string>();
+		const uniqueDomains = normalizedDomains.filter((d) => {
+			if (seen.has(d)) return false;
+			seen.add(d);
+			return true;
+		});
+
 		const validUris = redirectUris.map((u) => u.trim()).filter(Boolean);
 		if (validUris.length === 0) {
 			setError("At least one redirect URI is required.");
@@ -106,7 +141,7 @@ function AppSettingsView() {
 			await updateApp({
 				appId,
 				name: trimmedName,
-				description: description.trim() || undefined,
+				domains: uniqueDomains,
 				redirectUris: validUris,
 			});
 			if (!isMountedRef.current) return;
@@ -152,18 +187,18 @@ function AppSettingsView() {
 
 	if (app === undefined) {
 		return (
-			<div className="min-h-screen flex items-center justify-center">
-				<Loader2 className="size-5 text-[#444] animate-spin" />
+			<div className="flex min-h-screen items-center justify-center">
+				<Loader2 className="size-6 animate-spin text-muted-foreground" />
 			</div>
 		);
 	}
 
 	if (app === null) {
 		return (
-			<div className="min-h-screen flex flex-col">
+			<div className={cx.page}>
 				<SettingsHeader appId={appId} appName="Not found" />
 				<main className="flex-1 px-8 py-10">
-					<p className="text-sm text-[#f43f5e]">App not found.</p>
+					<p className="text-sm text-destructive">App not found.</p>
 				</main>
 			</div>
 		);
@@ -172,210 +207,242 @@ function AppSettingsView() {
 	const typedApp = app as { name: string };
 
 	return (
-		<div className="min-h-screen flex flex-col">
+		<div className={cx.page}>
 			<SettingsHeader appId={appId} appName={typedApp.name} />
 
-			<main className="flex-1 px-8 py-10 max-w-2xl w-full">
-				<div className="mb-8">
-					<h1 className="text-lg font-bold text-[#e8e8e8] tracking-tight mb-1">
-						App Settings
-					</h1>
-					<p className="text-xs text-[#555]">
-						Update your application&apos;s name, description, and redirect URIs.
-					</p>
-				</div>
-
-				<form onSubmit={handleSave} className="space-y-7 mb-16">
-					{/* Name */}
-					<div>
-						<label
-							htmlFor="app-name"
-							className="block text-[10px] tracking-widest uppercase text-[#666] mb-2"
-						>
-							App Name <span className="text-[#f43f5e]">*</span>
-						</label>
-						<input
-							id="app-name"
-							type="text"
-							value={name}
-							onChange={(e) => {
-								setName(e.target.value);
-								if (error) setError(null);
-							}}
-							required
-							maxLength={100}
-							className="w-full bg-[#0d0d0d] border border-[#1e1e1e] focus:border-[#60a5fa]/50 outline-none text-sm text-[#e8e8e8] placeholder:text-[#333] px-3 py-2.5 transition-colors"
-						/>
-					</div>
-
-					{/* Description */}
-					<div>
-						<label
-							htmlFor="app-description"
-							className="block text-[10px] tracking-widest uppercase text-[#666] mb-2"
-						>
-							Description{" "}
-							<span className="text-[#3a3a3a] normal-case">optional</span>
-						</label>
-						<textarea
-							id="app-description"
-							value={description}
-							onChange={(e) => setDescription(e.target.value)}
-							rows={2}
-							maxLength={300}
-							className="w-full bg-[#0d0d0d] border border-[#1e1e1e] focus:border-[#60a5fa]/50 outline-none text-sm text-[#e8e8e8] placeholder:text-[#333] px-3 py-2.5 transition-colors resize-none"
-						/>
-					</div>
-
-					{/* Redirect URIs */}
-					<div>
-						<p className="block text-[10px] tracking-widest uppercase text-[#666] mb-2">
-							Redirect URIs <span className="text-[#f43f5e]">*</span>
-						</p>
-						<div className="space-y-2">
-							{redirectUris.map((uri, i) => (
-								// biome-ignore lint/suspicious/noArrayIndexKey: redirect URI list is index-ordered by design
-								<div key={i} className="flex items-center gap-2">
-									<div className="flex-1 flex items-center border border-[#1e1e1e] focus-within:border-[#60a5fa]/50 transition-colors">
-										<span className="text-[10px] text-[#444] px-2 shrink-0 font-mono">
-											{i === 0 ? "default" : `uri ${i + 1}`}
-										</span>
-										<div className="w-px h-4 bg-[#1e1e1e]" />
-										<input
-											type="url"
-											value={uri}
-											onChange={(e) => {
-												updateUri(i, e.target.value);
-												if (error) setError(null);
-											}}
-											placeholder="https://yourapp.com/auth/callback"
-											className="flex-1 bg-transparent outline-none text-xs text-[#e8e8e8] placeholder:text-[#2a2a2a] px-3 py-2.5"
-										/>
-									</div>
-									{redirectUris.length > 1 && (
-										<button
-											type="button"
-											onClick={() => removeUri(i)}
-											className="text-[#333] hover:text-[#f43f5e] transition-colors p-1"
-										>
-											<Trash2 className="size-3" />
-										</button>
-									)}
-								</div>
-							))}
+			<main className="flex min-h-0 flex-1 flex-col">
+				<form onSubmit={handleSave} className="flex min-h-0 flex-1 flex-col">
+					<div className="grid min-h-0 flex-1 grid-cols-2">
+						<div className="min-h-0 overflow-y-auto px-8 py-8 sm:px-10">
+							<label htmlFor="app-name" className={cx.label}>
+								Name of the application{" "}
+								<span className="text-destructive">*</span>
+							</label>
+							<input
+								id="app-name"
+								type="text"
+								value={name}
+								onChange={(e) => {
+									setName(e.target.value);
+									if (error) setError(null);
+								}}
+								required
+								maxLength={100}
+								className={cx.input}
+							/>
 						</div>
-						<button
-							type="button"
-							onClick={addUri}
-							className="mt-3 flex items-center gap-1.5 text-[10px] text-[#444] hover:text-[#60a5fa] transition-colors"
-						>
-							<Plus className="size-3" />
-							Add another URI
-						</button>
+
+						<div className="min-h-0 space-y-8 overflow-y-auto px-8 py-8 sm:px-10">
+							<div>
+								<p className={cx.sectionLabel}>Add domain</p>
+								<p className={cx.sectionHint}>
+									Where your frontend app is running (the browser side).
+								</p>
+								<div className="mt-3 space-y-2">
+									{domains.map((d, i) => (
+										// biome-ignore lint/suspicious/noArrayIndexKey: domain list is index-ordered by design
+										<div key={i} className="flex items-center gap-3">
+											<input
+												type="text"
+												value={d}
+												onChange={(e) => {
+													updateDomain(i, e.target.value);
+													if (error) setError(null);
+												}}
+												placeholder="https://localhost:3000"
+												className={cx.input}
+											/>
+											{domains.length > 1 && (
+												<button
+													type="button"
+													onClick={() => removeDomain(i)}
+													className={cx.textActionDanger}
+												>
+													Remove
+												</button>
+											)}
+										</div>
+									))}
+								</div>
+								<button
+									type="button"
+									onClick={addDomain}
+									className={`mt-3 ${cx.textAction}`}
+								>
+									Add domain
+								</button>
+							</div>
+
+							<div>
+								<p className={cx.sectionLabel}>
+									Redirect URIs <span className="text-destructive">*</span>
+								</p>
+								<p className={cx.sectionHint}>
+									Where users are sent after they log in.
+								</p>
+								<div className="mt-3 space-y-2">
+									{redirectUris.map((uri, i) => (
+										// biome-ignore lint/suspicious/noArrayIndexKey: redirect URI list is index-ordered by design
+										<div key={i} className="flex items-center gap-3">
+											<div className={cx.inputRow}>
+												<span className="shrink-0 bg-muted/50 px-2.5 py-2 font-mono text-[10px] text-muted-foreground">
+													{i === 0 ? "default" : `uri ${i + 1}`}
+												</span>
+												<input
+													type="url"
+													value={uri}
+													onChange={(e) => {
+														updateUri(i, e.target.value);
+														if (error) setError(null);
+													}}
+													placeholder="https://yourapp.com/auth/callback"
+													className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60"
+												/>
+											</div>
+											{redirectUris.length > 1 && (
+												<button
+													type="button"
+													onClick={() => removeUri(i)}
+													className={cx.textActionDanger}
+												>
+													Remove
+												</button>
+											)}
+										</div>
+									))}
+								</div>
+								<button
+									type="button"
+									onClick={addUri}
+									className={`mt-3 ${cx.textAction}`}
+								>
+									Add redirect URI
+								</button>
+							</div>
+						</div>
 					</div>
 
-					{/* Status messages */}
+					<div className="shrink-0 border-border/50 border-t px-8 py-4 sm:px-10">
+						<div
+							className={`overflow-hidden border border-destructive/25 bg-destructive/5 ${r.main}`}
+						>
+							<div className="border-b border-destructive/15 px-5 py-3">
+								<h2 className="text-sm font-semibold text-destructive">
+									Danger zone
+								</h2>
+							</div>
+							<div className="px-5 py-4">
+								<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+									<div>
+										<p className="mb-1 text-sm font-semibold text-foreground">
+											Delete this application
+										</p>
+										<p className="text-xs leading-relaxed text-muted-foreground">
+											Permanently deletes the app, its credentials, and all
+											associated data from WorkOS. This cannot be undone.
+										</p>
+									</div>
+									<button
+										type="button"
+										onClick={() => setShowDeleteConfirm(true)}
+										className={`${cx.dangerBtn} shrink-0`}
+									>
+										Delete app
+									</button>
+								</div>
+
+								{showDeleteConfirm && (
+									<div
+										className={`mt-6 space-y-3 border border-destructive/20 bg-background/80 p-4 ${r.main}`}
+									>
+										<p className="text-xs text-muted-foreground">
+											Type{" "}
+											<code
+												className={`bg-muted px-1.5 py-0.5 font-mono text-foreground ${r.small}`}
+											>
+												{typedApp.name}
+											</code>{" "}
+											to confirm deletion:
+										</p>
+										<input
+											type="text"
+											value={deleteConfirmText}
+											onChange={(e) => setDeleteConfirmText(e.target.value)}
+											placeholder={typedApp.name}
+											className={cx.input}
+										/>
+										<div className="flex flex-wrap items-center gap-2">
+											<button
+												type="button"
+												onClick={handleDelete}
+												disabled={
+													deleteConfirmText !== typedApp.name || isDeleting
+												}
+												className={cx.dangerBtn}
+											>
+												{isDeleting ? (
+													<>
+														<Loader2 className="size-3.5 animate-spin" />
+														Deleting…
+													</>
+												) : (
+													"Confirm delete"
+												)}
+											</button>
+											<button
+												type="button"
+												onClick={() => {
+													setShowDeleteConfirm(false);
+													setDeleteConfirmText("");
+												}}
+												className={`${cx.ghostBtn} px-3 py-2`}
+											>
+												Cancel
+											</button>
+										</div>
+									</div>
+								)}
+							</div>
+						</div>
+					</div>
+
 					{error && (
-						<div className="flex items-start gap-2 border border-[#f43f5e]/30 bg-[#f43f5e]/05 px-3 py-2">
-							<AlertTriangle className="size-3 text-[#f43f5e] mt-0.5 shrink-0" />
-							<p className="text-xs text-[#f43f5e]">{error}</p>
+						<div className="shrink-0 border-border/50 border-t px-8 py-3 sm:px-10">
+							<div className={cx.alertError}>
+								<AlertTriangle className="mt-0.5 size-4 shrink-0" />
+								<p>{error}</p>
+							</div>
 						</div>
 					)}
-					{success && <p className="text-xs text-[#4ade80]">Settings saved.</p>}
+					{success && (
+						<div className="shrink-0 border-border/50 border-t px-8 py-2 sm:px-10">
+							<p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+								Settings saved.
+							</p>
+						</div>
+					)}
 
-					{/* Save */}
-					<div className="flex items-center gap-3">
-						<button
-							type="submit"
-							disabled={isSaving}
-							className="flex items-center gap-2 text-xs border border-[#60a5fa]/40 bg-[#60a5fa]/10 text-[#60a5fa] hover:bg-[#60a5fa]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors px-4 py-2"
-						>
+					<div className="mt-auto flex shrink-0 items-center justify-end gap-3 border-border/50 border-t bg-background/95 px-8 py-4 backdrop-blur-sm supports-[backdrop-filter]:bg-background/80 sm:px-10">
+						<Link href={`/console/apps/${appId}`} className={cx.secondaryBtn}>
+							Cancel
+						</Link>
+						<button type="submit" disabled={isSaving} className={cx.primaryBtn}>
 							{isSaving ? (
 								<>
-									<Loader2 className="size-3 animate-spin" />
+									<Loader2 className="size-4 animate-spin" />
 									Saving…
 								</>
 							) : (
-								"Save Changes"
+								<>
+									Save
+									<span className={cx.returnKeyCap} aria-hidden>
+										<CornerDownLeft className="size-4" strokeWidth={2.25} />
+									</span>
+								</>
 							)}
 						</button>
 					</div>
 				</form>
-
-				{/* Danger zone */}
-				<div className="border border-[#f43f5e]/20 bg-[#0d0d0d]">
-					<div className="px-5 py-4 border-b border-[#f43f5e]/10">
-						<h2 className="text-[10px] tracking-widest uppercase text-[#f43f5e]">
-							Danger Zone
-						</h2>
-					</div>
-					<div className="px-5 py-4">
-						<div className="flex items-start justify-between gap-4">
-							<div>
-								<p className="text-xs font-semibold text-[#c8c8c8] mb-1">
-									Delete this application
-								</p>
-								<p className="text-xs text-[#555]">
-									Permanently deletes the app, its credentials, and all
-									associated data from WorkOS. This cannot be undone.
-								</p>
-							</div>
-							<button
-								type="button"
-								onClick={() => setShowDeleteConfirm(true)}
-								className="shrink-0 text-[10px] border border-[#f43f5e]/30 text-[#f43f5e] hover:bg-[#f43f5e]/10 transition-colors px-3 py-1.5"
-							>
-								Delete App
-							</button>
-						</div>
-
-						{showDeleteConfirm && (
-							<div className="mt-5 border border-[#f43f5e]/20 bg-[#0a0a0a] p-4 space-y-3">
-								<p className="text-xs text-[#888]">
-									Type{" "}
-									<code className="text-[#e8e8e8] bg-[#1a1a1a] px-1">
-										{typedApp.name}
-									</code>{" "}
-									to confirm deletion:
-								</p>
-								<input
-									type="text"
-									value={deleteConfirmText}
-									onChange={(e) => setDeleteConfirmText(e.target.value)}
-									placeholder={typedApp.name}
-									className="w-full bg-[#0d0d0d] border border-[#2a2a2a] focus:border-[#f43f5e]/50 outline-none text-xs text-[#e8e8e8] px-3 py-2 transition-colors"
-								/>
-								<div className="flex items-center gap-2">
-									<button
-										type="button"
-										onClick={handleDelete}
-										disabled={deleteConfirmText !== typedApp.name || isDeleting}
-										className="flex items-center gap-1.5 text-xs border border-[#f43f5e]/40 bg-[#f43f5e]/10 text-[#f43f5e] hover:bg-[#f43f5e]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors px-3 py-1.5"
-									>
-										{isDeleting ? (
-											<>
-												<Loader2 className="size-3 animate-spin" />
-												Deleting…
-											</>
-										) : (
-											"Confirm Delete"
-										)}
-									</button>
-									<button
-										type="button"
-										onClick={() => {
-											setShowDeleteConfirm(false);
-											setDeleteConfirmText("");
-										}}
-										className="text-xs text-[#444] hover:text-[#888] transition-colors px-2 py-1.5"
-									>
-										Cancel
-									</button>
-								</div>
-							</div>
-						)}
-					</div>
-				</div>
 			</main>
 		</div>
 	);
@@ -389,22 +456,19 @@ function SettingsHeader({
 	appName: string;
 }) {
 	return (
-		<header className="border-b border-[#1e1e1e] px-6 py-3 flex items-center justify-between bg-[#0d0d0d]">
-			<div className="flex items-center gap-4">
-				<Link
+		<header className={cx.header}>
+			<div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-8">
+				<GsapPressLink
 					href={`/console/apps/${appId}`}
-					className="flex items-center gap-1.5 text-xs text-[#666] hover:text-[#e8e8e8] transition-colors"
+					className={cx.linkBack}
+					scale={0.99}
 				>
-					<ArrowLeft className="size-3" />
-					<span className="truncate max-w-32">{appName}</span>
-				</Link>
-				<div className="w-px h-4 bg-[#2a2a2a]" />
-				<div className="flex items-center gap-2">
-					<Terminal className="size-3.5 text-[#888]" />
-					<span className="text-xs font-semibold tracking-widest uppercase text-[#888]">
-						settings
-					</span>
-				</div>
+					<ArrowLeft className="size-4 shrink-0" />
+					<span className="max-w-[10rem] truncate">{appName}</span>
+				</GsapPressLink>
+				<p className="min-w-0 text-base font-semibold tracking-tight text-foreground">
+					App settings
+				</p>
 			</div>
 		</header>
 	);

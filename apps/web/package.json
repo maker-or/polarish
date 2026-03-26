@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hax/ai": "workspace:*",
     "@base-ui/react": "^1.2.0",
+    "@hax/ai": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/api-logs": "^0.213.0",
     "@phosphor-icons/react": "^2.1.10",
@@ -22,6 +22,7 @@
     "dotenv": "^16.6.1",
     "effect": "^3.19.19",
     "elysia": "^1.4.27",
+    "gsap": "^3.14.2",
     "iron-session": "^8.0.1",
     "lucide-react": "^0.542.0",
     "next": "^16.1.6",

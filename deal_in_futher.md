@@ -11,3 +11,9 @@ Reminder for later verification once the missing pieces are implemented and the 
 
 - Re-run schema validation after the assistant message path is wired up.
 - Rework key extraction logic, then test it with keys that include one underscore and multiple underscores.
+
+---
+
+## Console client secrets UI (local-only for now)
+
+`client-secrets-section.tsx` generates a **random hex string in the browser** (`randomHex`) and keeps rows in React state only — **not** WorkOS, **not** Convex. For real OAuth secrets, wire **`createClientSecret` / `listClientSecrets` / `revokeClientSecret`** from `convex/console.ts` back into that component and remove or replace the local `randomHex` flow.

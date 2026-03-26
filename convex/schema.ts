@@ -43,7 +43,8 @@ export default defineSchema({
     workosAppId: v.string(),
     workosClientId: v.string(),
     name: v.string(),
-    description: v.optional(v.string()),
+    /** Allowed frontend origins (browser) for this app — Convex-only; not synced to WorkOS. */
+    domains: v.optional(v.array(v.string())),
     redirectUri: v.array(
       v.object({
         uri: v.string(),

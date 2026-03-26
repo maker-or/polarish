@@ -6,6 +6,10 @@
  * SDK does not expose typed methods for the Connect API.
  *
  * WorkOS Connect REST API base: https://api.workos.com/connect
+ *
+ * Debug client-secret flows (Convex dashboard logs): set env
+ * `CONSOLE_DEBUG_CLIENT_SECRETS=1` on the deployment. Never logs raw secret
+ * strings — only ids, last-four, timings, and overlap warnings.
  */
 
 import { ConvexError, v } from "convex/values";
@@ -18,12 +22,56 @@ import { action, mutation, query } from "./_generated/server";
 
 const WORKOS_API_BASE = "https://api.workos.com";
 
+/** Fail before Convex action limits; avoids hanging forever on stalled TCP. */
+const WORKOS_FETCH_TIMEOUT_MS = 45_000;
+
+function debugClientSecretsEnabled(): boolean {
+  return process.env.CONSOLE_DEBUG_CLIENT_SECRETS === "1";
+}
+
+/** Safe ids for logs — never log full secrets. */
+function shortId(id: string, len = 12): string {
+  return id.length <= len ? id : `${id.slice(0, len)}…`;
+}
+
+function debugClientSecretsLog(
+  phase: string,
+  payload: Record<string, string | number | boolean | undefined>,
+): void {
+  if (!debugClientSecretsEnabled()) return;
+  console.log(
+    `[console][clientSecrets🔒] ${phase}`,
+    JSON.stringify({ ...payload, ts: Date.now() }),
+  );
+}
+
+/** In-process overlap detector (best-effort; helps spot duplicate concurrent calls). */
+const debugInFlight = new Map<string, number>();
+
+function debugLockEnter(lockKey: string, op: string): void {
+  if (!debugClientSecretsEnabled()) return;
+  const n = (debugInFlight.get(lockKey) ?? 0) + 1;
+  debugInFlight.set(lockKey, n);
+  if (n > 1) {
+    console.warn(
+      `[console][clientSecrets🔒] concurrent_${op}`,
+      JSON.stringify({ lockKey, depth: n, ts: Date.now() }),
+    );
+  }
+}
+
+function debugLockLeave(lockKey: string): void {
+  if (!debugClientSecretsEnabled()) return;
+  const n = (debugInFlight.get(lockKey) ?? 1) - 1;
+  if (n <= 0) debugInFlight.delete(lockKey);
+  else debugInFlight.set(lockKey, n);
+}
+
 interface WorkOSApp {
   object: string;
   id: string;
   client_id: string;
   name: string;
-  description?: string;
   application_type: string;
   redirect_uris: Array<{ uri: string; default: boolean }>;
   uses_pkce: boolean;
@@ -42,6 +90,19 @@ interface WorkOSClientSecret {
   secret?: string; // only present on creation
   last_four: string;
   created_at: string;
+}
+
+/** WorkOS list endpoints may return `{ data: [...] }`, `{ client_secrets: [...] }`, or a bare array. */
+function parseWorkOSClientSecretList(result: unknown): WorkOSClientSecret[] {
+  if (Array.isArray(result)) return result;
+  if (result && typeof result === "object") {
+    const o = result as Record<string, unknown>;
+    if (Array.isArray(o.data)) return o.data as WorkOSClientSecret[];
+    if (Array.isArray(o.client_secrets))
+      return o.client_secrets as WorkOSClientSecret[];
+    if (Array.isArray(o.items)) return o.items as WorkOSClientSecret[];
+  }
+  return [];
 }
 
 interface WorkOSOrganization {
@@ -69,13 +130,29 @@ async function workosRequest<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const url = `${WORKOS_API_BASE}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      ...workosHeaders(),
-      ...(options.headers as Record<string, string> | undefined),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WORKOS_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...workosHeaders(),
+        ...(options.headers as Record<string, string> | undefined),
+      },
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new ConvexError({
+        code: "WORKOS_TIMEOUT",
+        message: `WorkOS API request timed out after ${WORKOS_FETCH_TIMEOUT_MS / 1000}s`,
+      });
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     let detail = "";
@@ -95,6 +172,41 @@ async function workosRequest<T>(
   if (res.status === 204) return undefined as T;
 
   return res.json() as Promise<T>;
+}
+
+/** Normalize user-entered domain/origin to a stable origin string (http/https only). */
+function normalizeAllowedOrigin(raw: string): string {
+  const s = raw.trim();
+  if (!s) throw new ConvexError({ code: "INVALID_DOMAIN", message: "Domain cannot be empty" });
+  let url: URL;
+  try {
+    url = new URL(s.includes("://") ? s : `https://${s}`);
+  } catch {
+    throw new ConvexError({
+      code: "INVALID_DOMAIN",
+      message: `Invalid domain or origin: ${raw}`,
+    });
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ConvexError({
+      code: "INVALID_DOMAIN",
+      message: "Domain must use http or https",
+    });
+  }
+  return url.origin;
+}
+
+function normalizeDomainList(domains: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of domains) {
+    const o = normalizeAllowedOrigin(d);
+    if (!seen.has(o)) {
+      seen.add(o);
+      out.push(o);
+    }
+  }
+  return out;
 }
 
 async function ensureWorkosOrg(
@@ -137,7 +249,7 @@ export const listApps = query({
       workosAppId: a.workosAppId,
       workosClientId: a.workosClientId,
       name: a.name,
-      description: a.description,
+      domains: a.domains ?? [],
       redirectUri: a.redirectUri,
       createdAt: a._creationTime,
       updatedAt: a.updatedAt,
@@ -159,7 +271,6 @@ export const getApp = query({
       .first();
     if (!membership)
       throw new Error("User does not belong to any organisation");
-    console.log("the app id is ", args.appId);
     const app = await ctx.db.get("consoleApp", args.appId);
     if (!app) return null;
     if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
@@ -169,7 +280,7 @@ export const getApp = query({
       workosAppId: app.workosAppId,
       workosClientId: app.workosClientId,
       name: app.name,
-      description: app.description,
+      domains: app.domains ?? [],
       redirectUri: app.redirectUri,
       createdAt: app._creationTime,
       updatedAt: app.updatedAt,
@@ -187,7 +298,7 @@ export const _insertApp = mutation({
     workosAppId: v.string(),
     workosClientId: v.string(),
     name: v.string(),
-    description: v.optional(v.string()),
+    domains: v.array(v.string()),
     redirectUri: v.array(v.object({ uri: v.string(), default: v.boolean() })),
     orgId: v.id("organisation"),
     userId: v.string(),
@@ -201,7 +312,7 @@ export const _insertApp = mutation({
       workosAppId: args.workosAppId,
       workosClientId: args.workosClientId,
       name: args.name,
-      description: args.description,
+      domains: args.domains,
       redirectUri: args.redirectUri,
       orgId: args.orgId,
       userId: args.userId,
@@ -214,7 +325,7 @@ export const _patchApp = mutation({
   args: {
     appId: v.id("consoleApp"),
     name: v.optional(v.string()),
-    description: v.optional(v.string()),
+    domains: v.optional(v.array(v.string())),
     redirectUri: v.optional(
       v.array(v.object({ uri: v.string(), default: v.boolean() })),
     ),
@@ -227,8 +338,7 @@ export const _patchApp = mutation({
     const { appId, ...fields } = args;
     const patch: Record<string, unknown> = { updatedAt: Date.now() };
     if (fields.name !== undefined) patch.name = fields.name;
-    if (fields.description !== undefined)
-      patch.description = fields.description;
+    if (fields.domains !== undefined) patch.domains = fields.domains;
     if (fields.redirectUri !== undefined)
       patch.redirectUri = fields.redirectUri;
     await ctx.db.patch(appId, patch);
@@ -257,7 +367,7 @@ export const _deleteApp = mutation({
 export const createApp = action({
   args: {
     name: v.string(),
-    description: v.optional(v.string()),
+    domains: v.array(v.string()),
     redirectUris: v.array(v.string()),
   },
   handler: async (ctx, args): Promise<{ appId: string; clientId: string }> => {
@@ -286,6 +396,8 @@ export const createApp = action({
       });
     }
 
+    const normalizedDomains = normalizeDomainList(args.domains);
+
     const redirectUriObjects = args.redirectUris.map((uri, i) => ({
       uri,
       default: i === 0,
@@ -296,7 +408,6 @@ export const createApp = action({
       body: JSON.stringify({
         name: args.name,
         application_type: "oauth",
-        description: args.description,
         redirect_uris: redirectUriObjects,
         uses_pkce: false,
         is_first_party: false,
@@ -308,7 +419,7 @@ export const createApp = action({
       workosAppId: workosApp.id,
       workosClientId: workosApp.client_id,
       name: workosApp.name,
-      description: args.description,
+      domains: normalizedDomains,
       redirectUri: workosApp.redirect_uris,
       orgId: membership.orgId,
       userId,
@@ -323,7 +434,7 @@ export const updateApp = action({
   args: {
     appId: v.id("consoleApp"),
     name: v.optional(v.string()),
-    description: v.optional(v.string()),
+    domains: v.optional(v.array(v.string())),
     redirectUris: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args): Promise<void> => {
@@ -340,27 +451,50 @@ export const updateApp = action({
     if (!app) throw new Error("App not found");
     if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
 
+    const normalizedDomains =
+      args.domains !== undefined
+        ? normalizeDomainList(args.domains)
+        : undefined;
+
     const workosPayload: Record<string, unknown> = {};
-    if (args.name) workosPayload.name = args.name;
-    if (args.description !== undefined)
-      workosPayload.description = args.description;
-    if (args.redirectUris) {
+    if (args.name !== undefined) workosPayload.name = args.name;
+    if (args.redirectUris !== undefined) {
       workosPayload.redirect_uris = args.redirectUris.map((uri, i) => ({
         uri,
         default: i === 0,
       }));
     }
 
-    const updated = await workosRequest<WorkOSApp>(
-      `/connect/applications/${app.workosAppId}`,
-      { method: "PUT", body: JSON.stringify(workosPayload) },
-    );
+    let nextName = app.name;
+    let nextRedirectUri = app.redirectUri;
+
+    if (Object.keys(workosPayload).length > 0) {
+      const updated = await workosRequest<WorkOSApp>(
+        `/connect/applications/${app.workosAppId}`,
+        { method: "PUT", body: JSON.stringify(workosPayload) },
+      );
+      nextName = updated.name;
+      nextRedirectUri = updated.redirect_uris;
+    }
+
+    const hasConvexPatch =
+      Object.keys(workosPayload).length > 0 ||
+      normalizedDomains !== undefined;
+    if (!hasConvexPatch) {
+      throw new ConvexError({
+        code: "NOTHING_TO_UPDATE",
+        message: "No fields to update",
+      });
+    }
 
     await ctx.runMutation(api.console._patchApp, {
       appId: args.appId,
-      name: updated.name,
-      description: args.description,
-      redirectUri: updated.redirect_uris,
+      ...(Object.keys(workosPayload).length > 0
+        ? { name: nextName, redirectUri: nextRedirectUri }
+        : {}),
+      ...(normalizedDomains !== undefined
+        ? { domains: normalizedDomains }
+        : {}),
     });
   },
 });
@@ -399,37 +533,75 @@ export const createClientSecret = action({
   handler: async (
     ctx,
     args,
-  ): Promise<{ secretId: string; secret: string; lastFour: string }> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-
-    const membership = await ctx.runQuery(api.org.getMyMembership);
-    if (!membership)
-      throw new Error("User does not belong to any organisation");
-    if (membership.role !== "admin")
-      throw new Error("Only admins can create secrets");
-
-    const app = await ctx.runQuery(api.console.getApp, { appId: args.appId });
-    if (!app) throw new Error("App not found");
-    if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
-
-    const secret = await workosRequest<WorkOSClientSecret>(
-      `/connect/applications/${app.workosAppId}/client_secrets`,
-      { method: "POST", body: JSON.stringify({ name: args.name }) },
-    );
-
-    if (!secret.secret) {
-      throw new ConvexError({
-        code: "MISSING_SECRET",
-        message: "WorkOS did not return the secret value",
+  ): Promise<{
+    secretId: string;
+    secret: string;
+    lastFour: string;
+    name: string;
+    createdAt: string;
+  }> => {
+    const t0 = Date.now();
+    const lockKey = `create:${args.appId}`;
+    debugLockEnter(lockKey, "create");
+    try {
+      debugClientSecretsLog("create_start", {
+        appId: shortId(String(args.appId)),
+        label: args.name,
       });
-    }
 
-    return {
-      secretId: secret.id,
-      secret: secret.secret,
-      lastFour: secret.last_four,
-    };
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) throw new Error("Unauthenticated");
+
+      const [membership, app] = await Promise.all([
+        ctx.runQuery(api.org.getMyMembership),
+        ctx.runQuery(api.console.getApp, { appId: args.appId }),
+      ]);
+      if (!membership)
+        throw new Error("User does not belong to any organisation");
+      if (membership.role !== "admin")
+        throw new Error("Only admins can create secrets");
+      if (!app) throw new Error("App not found");
+      if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
+
+      const secret = await workosRequest<WorkOSClientSecret>(
+        `/connect/applications/${app.workosAppId}/client_secrets`,
+        { method: "POST", body: JSON.stringify({ name: args.name }) },
+      );
+
+      if (!secret.secret) {
+        debugClientSecretsLog("create_missing_secret_body", {
+          durationMs: Date.now() - t0,
+          workosReturnedId: shortId(secret.id),
+        });
+        throw new ConvexError({
+          code: "MISSING_SECRET",
+          message: "WorkOS did not return the secret value",
+        });
+      }
+
+      debugClientSecretsLog("create_ok", {
+        secretId: shortId(secret.id),
+        lastFour: secret.last_four,
+        hasSecretValue: true,
+        durationMs: Date.now() - t0,
+      });
+
+      return {
+        secretId: secret.id,
+        secret: secret.secret,
+        lastFour: secret.last_four,
+        name: secret.name,
+        createdAt: secret.created_at ?? new Date().toISOString(),
+      };
+    } catch (e) {
+      debugClientSecretsLog("create_fail", {
+        message: e instanceof Error ? e.message : String(e),
+        durationMs: Date.now() - t0,
+      });
+      throw e;
+    } finally {
+      debugLockLeave(lockKey);
+    }
   },
 });
 
@@ -442,27 +614,78 @@ export const listClientSecrets = action({
   ): Promise<
     Array<{ id: string; name: string; lastFour: string; createdAt: string }>
   > => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    const t0 = Date.now();
+    const lockKey = `list:${args.appId}`;
+    debugLockEnter(lockKey, "list");
+    try {
+      debugClientSecretsLog("list_start", {
+        appId: shortId(String(args.appId)),
+      });
 
-    const membership = await ctx.runQuery(api.org.getMyMembership);
-    if (!membership)
-      throw new Error("User does not belong to any organisation");
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) throw new Error("Unauthenticated");
 
-    const app = await ctx.runQuery(api.console.getApp, { appId: args.appId });
-    if (!app) throw new Error("App not found");
-    if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
+      const [membership, app] = await Promise.all([
+        ctx.runQuery(api.org.getMyMembership),
+        ctx.runQuery(api.console.getApp, { appId: args.appId }),
+      ]);
+      if (!membership)
+        throw new Error("User does not belong to any organisation");
+      if (!app) throw new Error("App not found");
+      if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
 
-    const result = await workosRequest<{ data: WorkOSClientSecret[] }>(
-      `/connect/applications/${app.workosAppId}/client_secrets`,
-    );
+      debugClientSecretsLog("list_auth_ok", {
+        workosAppId: shortId(app.workosAppId),
+      });
 
-    return result.data.map((s) => ({
-      id: s.id,
-      name: s.name,
-      lastFour: s.last_four,
-      createdAt: s.created_at,
-    }));
+      const result = await workosRequest<unknown>(
+        `/connect/applications/${app.workosAppId}/client_secrets`,
+      );
+
+      const shape =
+        result === null || result === undefined
+          ? "null"
+          : Array.isArray(result)
+            ? "array"
+            : typeof result === "object"
+              ? `keys:${Object.keys(result as object).sort().join(",")}`
+              : typeof result;
+
+      const secrets = parseWorkOSClientSecretList(result);
+      debugClientSecretsLog("list_parse", {
+        responseShape: shape,
+        parsedCount: secrets.length,
+      });
+
+      const rows = secrets
+        .filter(
+          (s) =>
+            typeof s.id === "string" &&
+            s.id.length > 0 &&
+            typeof s.name === "string",
+        )
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          lastFour: s.last_four ?? "",
+          createdAt: s.created_at ?? "",
+        }));
+
+      debugClientSecretsLog("list_ok", {
+        rowCount: rows.length,
+        durationMs: Date.now() - t0,
+      });
+
+      return rows;
+    } catch (e) {
+      debugClientSecretsLog("list_fail", {
+        message: e instanceof Error ? e.message : String(e),
+        durationMs: Date.now() - t0,
+      });
+      throw e;
+    } finally {
+      debugLockLeave(lockKey);
+    }
   },
 });
 
@@ -473,22 +696,43 @@ export const revokeClientSecret = action({
     secretId: v.string(),
   },
   handler: async (ctx, args): Promise<void> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    const t0 = Date.now();
+    const lockKey = `revoke:${args.appId}:${args.secretId}`;
+    debugLockEnter(lockKey, "revoke");
+    try {
+      debugClientSecretsLog("revoke_start", {
+        appId: shortId(String(args.appId)),
+        secretId: shortId(args.secretId),
+      });
 
-    const membership = await ctx.runQuery(api.org.getMyMembership);
-    if (!membership)
-      throw new Error("User does not belong to any organisation");
-    if (membership.role !== "admin")
-      throw new Error("Only admins can revoke secrets");
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) throw new Error("Unauthenticated");
 
-    const app = await ctx.runQuery(api.console.getApp, { appId: args.appId });
-    if (!app) throw new Error("App not found");
-    if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
+      const [membership, app] = await Promise.all([
+        ctx.runQuery(api.org.getMyMembership),
+        ctx.runQuery(api.console.getApp, { appId: args.appId }),
+      ]);
+      if (!membership)
+        throw new Error("User does not belong to any organisation");
+      if (membership.role !== "admin")
+        throw new Error("Only admins can revoke secrets");
+      if (!app) throw new Error("App not found");
+      if (app.orgId !== membership.orgId) throw new Error("Unauthorized");
 
-    await workosRequest(`/connect/client_secrets/${args.secretId}`, {
-      method: "DELETE",
-    });
+      await workosRequest(`/connect/client_secrets/${args.secretId}`, {
+        method: "DELETE",
+      });
+
+      debugClientSecretsLog("revoke_ok", { durationMs: Date.now() - t0 });
+    } catch (e) {
+      debugClientSecretsLog("revoke_fail", {
+        message: e instanceof Error ? e.message : String(e),
+        durationMs: Date.now() - t0,
+      });
+      throw e;
+    } finally {
+      debugLockLeave(lockKey);
+    }
   },
 });
 

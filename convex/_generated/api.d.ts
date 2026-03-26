@@ -14,6 +14,7 @@ import type * as dodo from "../dodo.js";
 import type * as http from "../http.js";
 import type * as lib_encryption from "../lib/encryption.js";
 import type * as lib_gen from "../lib/gen.js";
+import type * as migrations from "../migrations.js";
 import type * as org from "../org.js";
 import type * as secert from "../secert.js";
 import type * as users from "../users.js";
@@ -31,6 +32,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   "lib/encryption": typeof lib_encryption;
   "lib/gen": typeof lib_gen;
+  migrations: typeof migrations;
   org: typeof org;
   secert: typeof secert;
   users: typeof users;
