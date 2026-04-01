@@ -526,7 +526,13 @@ function resolveBody(
 			request,
 			providerName: request.provider,
 			upstreamUrl: `${model.baseUrl.toString().replace(/\/$/, "")}/codex/responses`,
-			upstreamPayload: compileRequest(request),
+			// Codex upstream is consumed as SSE even when the caller wants a batch result.
+			// We always request a streamed upstream response and collect it internally
+			// when `request.stream` is false.
+			upstreamPayload: {
+				...compileRequest(request),
+				stream: true,
+			},
 		};
 	});
 

@@ -1,5 +1,6 @@
 import {
 	type AppRequestShapeType,
+	type AttachmentContentType,
 	type UnifiedResponseType,
 	create,
 } from "@hax/ai";
@@ -22,6 +23,7 @@ export type PlaygroundConfig = {
 export type RunPlaygroundRequestOptions = {
 	prompt: string;
 	stream: boolean;
+	files: File[];
 	onTextDelta?: (delta: string) => void;
 };
 
@@ -113,6 +115,76 @@ export function maskToken(token: string): string {
 	return `${token.slice(0, 4)}...${token.slice(-4)}`;
 }
 
+/**
+ * This reads a browser file and returns the base64 payload without the data URL prefix.
+ */
+async function readFileAsBase64(file: File): Promise<string> {
+	const dataUrl = await new Promise<string>((resolve, reject) => {
+		const reader = new FileReader();
+
+		reader.onload = () => {
+			if (typeof reader.result !== "string") {
+				reject(new Error(`Could not read ${file.name} as a data URL.`));
+				return;
+			}
+
+			resolve(reader.result);
+		};
+
+		reader.onerror = () => {
+			reject(reader.error ?? new Error(`Could not read ${file.name}.`));
+		};
+
+		reader.readAsDataURL(file);
+	});
+
+	const commaIndex = dataUrl.indexOf(",");
+	if (commaIndex === -1) {
+		throw new Error(`Could not parse the encoded content for ${file.name}.`);
+	}
+
+	return dataUrl.slice(commaIndex + 1);
+}
+
+/**
+ * This maps a browser file into the attachment kind we use in the unified request.
+ */
+function getAttachmentKind(file: File): AttachmentContentType["kind"] {
+	if (file.type.startsWith("image/")) {
+		return "image";
+	}
+
+	if (file.type.startsWith("audio/")) {
+		return "audio";
+	}
+
+	if (file.type.startsWith("video/")) {
+		return "video";
+	}
+
+	return "document";
+}
+
+/**
+ * This turns browser files into unified attachment content parts for the request.
+ */
+async function createAttachmentContents(
+	files: File[],
+): Promise<AttachmentContentType[]> {
+	return Promise.all(
+		files.map(async (file) => ({
+			type: "attachment",
+			kind: getAttachmentKind(file),
+			mimetype: file.type || "application/octet-stream",
+			filename: file.name,
+			source: {
+				type: "base64",
+				data: await readFileAsBase64(file),
+			},
+		})),
+	);
+}
+
 async function consumeTextStream(
 	stream: ReadableStream<string>,
 	onChunk: (delta: string) => void,
@@ -136,6 +208,7 @@ async function consumeTextStream(
 export async function runPlaygroundRequest({
 	prompt,
 	stream,
+	files,
 	onTextDelta,
 }: RunPlaygroundRequestOptions): Promise<RunPlaygroundRequestResult> {
 	const config = getPlaygroundConfig();
@@ -143,6 +216,18 @@ export async function runPlaygroundRequest({
 	if (config.envError) {
 		throw new Error(config.envError);
 	}
+
+	const attachments = await createAttachmentContents(files);
+	const trimmedPrompt = prompt.trim();
+	const messageContent =
+		attachments.length === 0
+			? trimmedPrompt
+			: [
+					...(trimmedPrompt
+						? ([{ type: "text", text: trimmedPrompt }] as const)
+						: []),
+					...attachments,
+				];
 
 	const request = {
 		provider: "openai-codex",
@@ -155,7 +240,7 @@ export async function runPlaygroundRequest({
 		messages: [
 			{
 				role: "user",
-				content: prompt,
+				content: messageContent,
 				timestamp: Date.now(),
 			},
 		],

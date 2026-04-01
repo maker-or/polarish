@@ -2,126 +2,137 @@ import { Schema } from "effect";
 import { BaseModel, message } from "../../types";
 
 export const CodexResponseStatus = Schema.Literal(
-  "completed",
-  "incomplete",
-  "failed",
-  "cancelled",
-  "queued",
-  "in_progress",
+	"completed",
+	"incomplete",
+	"failed",
+	"cancelled",
+	"queued",
+	"in_progress",
 );
 export const CodexReasoningEffort = Schema.Literal(
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
 );
 
 export const textInput = Schema.Struct({
-  type: Schema.Literal("input_text"),
-  text: Schema.String,
+	type: Schema.Literal("input_text"),
+	text: Schema.String,
 });
 
 export const imageInput = Schema.Struct({
-  type: Schema.Literal("input_image"),
-  image_url: Schema.String,
+	type: Schema.Literal("input_image"),
+	image_url: Schema.optional(Schema.String),
+	file_id: Schema.optional(Schema.String),
 });
 
-export const codexInputContent = Schema.Union(textInput, imageInput);
+/**
+ * This is a file input that we send to Codex for non-image attachments.
+ */
+export const fileInput = Schema.Struct({
+	type: Schema.Literal("input_file"),
+	file_data: Schema.optional(Schema.String),
+	file_url: Schema.optional(Schema.String),
+	file_id: Schema.optional(Schema.String),
+	filename: Schema.optional(Schema.String),
+});
+
+export const codexInputContent = Schema.Union(textInput, imageInput, fileInput);
 
 /**
  *  Assistant turns in Codex Responses `input` must use `output_text` or `refusal`, not `input_*`.
  */
 export const assistantContentPart = Schema.Struct({
-  type: Schema.Literal("output_text"),
-  text: Schema.String,
+	type: Schema.Literal("output_text"),
+	text: Schema.String,
 });
 
 /**
  *  these usally represent input array that we send in the codex for different roles
  */
 const devloperMessagetype = Schema.Struct({
-  role: Schema.Literal("developer"),
-  content: Schema.String,
+	role: Schema.Literal("developer"),
+	content: Schema.String,
 });
 
 const userMessageType = Schema.Struct({
-  role: Schema.Literal("user"),
-  content: Schema.Union(Schema.String, Schema.Array(codexInputContent)),
+	role: Schema.Literal("user"),
+	content: Schema.Union(Schema.String, Schema.Array(codexInputContent)),
 });
 
 const assistantMessageType = Schema.Struct({
-  role: Schema.Literal("assistant"),
-  content: Schema.Union(Schema.String, Schema.Array(assistantContentPart)),
+	role: Schema.Literal("assistant"),
+	content: Schema.Union(Schema.String, Schema.Array(assistantContentPart)),
 });
 
 export const inputMessageType = Schema.Union(
-  devloperMessagetype,
-  userMessageType,
-  assistantMessageType,
+	devloperMessagetype,
+	userMessageType,
+	assistantMessageType,
 );
 
 /**
  *  this are the model name that we need to use when sending requests to the codex APIs
  */
 export const CodexModelId = Schema.Literal(
-  "gpt-5.1",
-  "gpt-5.1-codex-max",
-  "gpt-5.1-codex-mini",
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-spark",
-  "gpt-5.4",
+	"gpt-5.1",
+	"gpt-5.1-codex-max",
+	"gpt-5.1-codex-mini",
+	"gpt-5.2",
+	"gpt-5.2-codex",
+	"gpt-5.3-codex",
+	"gpt-5.3-codex-spark",
+	"gpt-5.4",
 );
-
 
 /**
  *  this is the shape of the body that we send to the codex APIs
  */
 export const codexRequestShape = Schema.Struct({
-  model: CodexModelId,
-  instructions: Schema.String,
-  input: Schema.Array(inputMessageType),
-  stream: Schema.Boolean,
-  store: Schema.Boolean,
+	model: CodexModelId,
+	instructions: Schema.String,
+	input: Schema.Array(inputMessageType),
+	stream: Schema.Boolean,
+	store: Schema.Boolean,
 });
 
 export const CodexReasoningSummary = Schema.Literal(
-  "auto",
-  "concise",
-  "detailed",
-  "off",
-  "on",
+	"auto",
+	"concise",
+	"detailed",
+	"off",
+	"on",
 );
 
 /**
  *  this is the codex specific type from the unified request api
  */
 export const appRequestShape = Schema.Struct({
-  provider: Schema.Literal("openai-codex"),
-  system: Schema.String,
-  stream: Schema.Boolean,
-  messages: Schema.Array(message),
-  temperature: Schema.Number,
-  maxRetries: Schema.Number,
-  signal: Schema.optional(Schema.instanceOf(AbortSignal)),
-  model: CodexModelId,
+	provider: Schema.Literal("openai-codex"),
+	system: Schema.String,
+	stream: Schema.Boolean,
+	messages: Schema.Array(message),
+	temperature: Schema.Number,
+	maxRetries: Schema.Number,
+	signal: Schema.optional(Schema.instanceOf(AbortSignal)),
+	model: CodexModelId,
 });
 
 export const CodexModelsSchema = Schema.Record({
-  key: CodexModelId,
-  value: BaseModel,
+	key: CodexModelId,
+	value: BaseModel,
 });
 /**
  * This is the shape that we expected chunck that come from your infernce provider to be
  */
 const streamShape = Schema.Struct({
-  event: Schema.String,
-  data: Schema.Record({
-    key: Schema.String,
-    value: Schema.Unknown,
-  }),
+	event: Schema.String,
+	data: Schema.Record({
+		key: Schema.String,
+		value: Schema.Unknown,
+	}),
 });
 export type CodexResponseStatus = typeof CodexResponseStatus.Type;
 export type ReasoningEffort = typeof CodexReasoningEffort.Type;
@@ -134,4 +145,5 @@ export type inputMessageType = typeof inputMessageType.Type;
 export type codexRequestShape = typeof codexRequestShape.Type;
 export type textInput = typeof textInput.Type;
 export type imageInput = typeof imageInput.Type;
+export type fileInput = typeof fileInput.Type;
 export type streamShape = typeof streamShape.Type;

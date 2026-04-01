@@ -25,7 +25,46 @@ const cost = Schema.Struct({
 	cacheWrite: Schema.Number,
 });
 
-const InputType = Schema.Literal("text", "image");
+/**
+ * This tells us what kind of attachment we are sending in the message.
+ */
+export const AttachmentKind = Schema.Literal(
+	"image",
+	"audio",
+	"video",
+	"document",
+);
+
+/**
+ * This is the source of the attachment that we are sending in the message.
+ */
+export const AttachmentSource = Schema.Union(
+	Schema.Struct({
+		type: Schema.Literal("base64"),
+		data: Schema.String,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("url"),
+		url: Schema.String,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("file_id"),
+		fileId: Schema.String,
+	}),
+);
+
+/**
+ * This is the attachment content that we are sending in the message.
+ */
+export const AttachmentContent = Schema.Struct({
+	type: Schema.Literal("attachment"),
+	kind: AttachmentKind,
+	mimetype: Schema.String,
+	filename: Schema.optional(Schema.String),
+	source: AttachmentSource,
+});
+
+const InputType = Schema.Literal("text", "attachment");
 // add the provider specific fields like  reasoningEffort , ResponseStatus , reasoningSummary in the type.ts in that particaular folder
 export const BaseModel = Schema.Struct({
 	id: Schema.String,
@@ -43,12 +82,6 @@ export const TextContent = Schema.Struct({
 	type: Schema.Literal("text"),
 	text: Schema.String,
 	textSignature: Schema.optional(Schema.String),
-});
-
-export const ImageContent = Schema.Struct({
-	type: Schema.Literal("image"),
-	data: Schema.String, // base64 encoded image data
-	mimetype: Schema.String,
 });
 
 export const ThinkingContent = Schema.Struct({
@@ -81,7 +114,7 @@ export const Usage = Schema.Struct({
 	}),
 });
 
-export const content = Schema.Union(TextContent, ImageContent);
+export const content = Schema.Union(TextContent, AttachmentContent);
 
 export const UserMessage = Schema.Struct({
 	role: Schema.Literal("user"),
@@ -103,7 +136,7 @@ export const ToolResultMessage = Schema.Struct({
 	role: Schema.Literal("tool"),
 	toolCallId: Schema.String,
 	toolName: Schema.String,
-	content: Schema.Array(Schema.Union(TextContent, ImageContent)),
+	content: Schema.Array(Schema.Union(TextContent, AttachmentContent)),
 	isError: Schema.Boolean,
 	timestamp: Schema.Number,
 });
@@ -225,11 +258,13 @@ export const UnifiedResponse = Schema.Struct({
 export type Provider = typeof Provider.Type;
 export type Transport = typeof Transport.Type;
 export type cost = typeof cost.Type;
+export type AttachmentKind = typeof AttachmentKind.Type;
+export type AttachmentSource = typeof AttachmentSource.Type;
 export type InputType = typeof InputType.Type;
 export type BaseModel = typeof BaseModel.Type;
 export type requestShape = typeof requestShape.Type;
 export type TextContent = typeof TextContent.Type;
-export type ImageContent = typeof ImageContent.Type;
+export type AttachmentContent = typeof AttachmentContent.Type;
 export type ThinkingContent = typeof ThinkingContent.Type;
 export type Toolcall = typeof Toolcall.Type;
 export type Usage = typeof Usage.Type;

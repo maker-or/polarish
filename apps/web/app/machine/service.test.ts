@@ -252,7 +252,10 @@ describe("handleRequest", () => {
 			...request,
 			stream: false,
 		} satisfies AppRequestShapeType;
-		const expectedPayload = compileRequest(nonStreamingRequest);
+		const expectedPayload = {
+			...compileRequest(nonStreamingRequest),
+			stream: true,
+		};
 
 		postImpl = async (url, data, config) => {
 			if (url === "https://chatgpt.com/backend-api/codex/responses") {
