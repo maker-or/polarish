@@ -1,12 +1,8 @@
 import { useState } from "react";
-import {
-	type PlaygroundRunInput,
-	runPlaygroundRequest,
-} from "./lib/playground-client";
+import { runPlaygroundRequest } from "./lib/playground-client";
 
 function App() {
 	const [message, setMessage] = useState("hello");
-	const [model, setModel] = useState<PlaygroundRunInput["model"]>("gpt-5.4");
 	const [output, setOutput] = useState("");
 	const [events, setEvents] = useState<string[]>([]);
 	const [traceLogs, setTraceLogs] = useState<string[]>([]);
@@ -24,21 +20,22 @@ function App() {
 
 		try {
 			await runPlaygroundRequest(
-				{ latestMessage: message, model },
+
+				{ latestMessage: message },
 				{
-					onTrace: (message) => {
+					onTrace: (message: string) => {
 						setTraceLogs((prev) => [...prev, message]);
 					},
-					onEvent: (event) => {
+					onEvent: (event: { type: string }) => {
 						setEvents((prev) => [...prev, event.type]);
 					},
-					onTextDelta: (event) => {
+					onTextDelta: (event: { delta: string }) => {
 						setOutput((prev) => prev + event.delta);
 					},
-					onDone: (event) => {
+					onDone: (event: { message: unknown }) => {
 						setFinalJson(JSON.stringify(event.message, null, 2));
 					},
-					onError: (event) => {
+					onError: (event: { error: unknown }) => {
 						setErrorJson(JSON.stringify(event.error, null, 2));
 					},
 				},
@@ -63,13 +60,6 @@ function App() {
 				value={message}
 				onChange={(e) => setMessage(e.target.value)}
 				rows={4}
-			/>
-
-			<input
-				value={model ?? ""}
-				onChange={(e) =>
-					setModel((e.target.value || "gpt-5.4") as PlaygroundRunInput["model"])
-				}
 			/>
 
 			<button

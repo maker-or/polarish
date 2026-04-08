@@ -219,6 +219,59 @@ export const ApprovalRejectionMode = Schema.Literal(
  */
 export const ApprovalStatus = Schema.Literal("pending", "approved", "rejected");
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isJsonValue = (value: unknown): boolean => {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	) {
+		return true;
+	}
+
+	if (Array.isArray(value)) {
+		return value.every(isJsonValue);
+	}
+
+	if (isPlainRecord(value)) {
+		return Object.values(value).every(isJsonValue);
+	}
+
+	return false;
+};
+
+const isJsonSchemaObject = (
+	value: unknown,
+): value is Record<
+	string,
+	string | number | boolean | null | unknown[] | object
+> => isPlainRecord(value) && Object.values(value).every(isJsonValue);
+
+const isZodSchema = (value: unknown): boolean =>
+	isPlainRecord(value) &&
+	"_zod" in value &&
+	typeof value.safeParse === "function";
+
+const isEffectSchema = (value: unknown): boolean => Schema.isSchema(value);
+
+/**
+ * This is the supported tool input schema shape that callers can pass to the SDK.
+ * We allow plain JSON Schema objects, Zod schemas, Effect schemas, and JS or TS object shorthand.
+ */
+export const ToolInputSchema = Schema.Unknown.pipe(
+	Schema.filter(
+		(value): value is unknown =>
+			isJsonSchemaObject(value) || isZodSchema(value) || isEffectSchema(value),
+		{
+			message: () =>
+				"Tool input schema must be a JSON Schema object, a Zod schema, an Effect schema, or JS/TS object shorthand.",
+		},
+	),
+);
+
 /**
  * This is the request that the UI can use to ask the user for approval.
  */
@@ -238,13 +291,13 @@ export const ApprovalRequest = Schema.Struct({
 
 /**
  * This is the public tool definition that callers register with the SDK.
- * The schemas stay unknown here because each app can bring its own schema object.
+ * The input schema must be a JSON Schema object, a Zod schema, an Effect schema, or JS or TS object shorthand.
  * The execute function runs the tool locally when the caller wants to handle tool calls.
  */
 export const ToolDefinition = Schema.Struct({
 	name: Schema.String,
 	description: Schema.String,
-	inputSchema: Schema.Unknown,
+	inputSchema: ToolInputSchema,
 	outputSchema: Schema.optional(Schema.Unknown),
 	execute: Schema.optional(Schema.Any),
 	retrySafe: Schema.optional(Schema.Boolean),

@@ -10,6 +10,7 @@
 
 import type * as aicrendital from "../aicrendital.js";
 import type * as console from "../console.js";
+import type * as desktopHandoff from "../desktopHandoff.js";
 import type * as dodo from "../dodo.js";
 import type * as http from "../http.js";
 import type * as lib_encryption from "../lib/encryption.js";
@@ -28,6 +29,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   aicrendital: typeof aicrendital;
   console: typeof console;
+  desktopHandoff: typeof desktopHandoff;
   dodo: typeof dodo;
   http: typeof http;
   "lib/encryption": typeof lib_encryption;

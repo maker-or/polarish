@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { Schema } from "effect";
+import { z } from "zod";
 import { compileRequest } from "./compile-request.ts";
 import type { appRequestShape } from "./types.ts";
 
@@ -253,5 +255,322 @@ describe("compileRequest", () => {
 			stream: false,
 			store: false,
 		});
+	});
+
+	test("converts zod tool schemas into JSON Schema for Codex", () => {
+		const request: appRequestShape = {
+			provider: "openai-codex",
+			model: "gpt-5.4",
+			system: "Call tools when needed.",
+			stream: false,
+			temperature: 0,
+			maxRetries: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Add two numbers.",
+					timestamp: 1,
+				},
+			],
+			tools: [
+				{
+					name: "sum",
+					description: "Adds two numbers.",
+					inputSchema: z.object({
+						a: z.number(),
+						b: z.number(),
+					}),
+				},
+			],
+		};
+
+		expect(compileRequest(request)).toEqual({
+			model: "gpt-5.4",
+			instructions: "Call tools when needed.",
+			input: [
+				{
+					role: "user",
+					content: "Add two numbers.",
+				},
+			],
+			tools: [
+				{
+					type: "function",
+					name: "sum",
+					description: "Adds two numbers.",
+					parameters: {
+						type: "object",
+						properties: {
+							a: {
+								type: "number",
+							},
+							b: {
+								type: "number",
+							},
+						},
+						required: ["a", "b"],
+						additionalProperties: false,
+						$schema: "http://json-schema.org/draft-07/schema#",
+					},
+					strict: true,
+				},
+			],
+			stream: false,
+			store: false,
+		});
+	});
+
+	test("converts effect tool schemas into JSON Schema for Codex", () => {
+		const request: appRequestShape = {
+			provider: "openai-codex",
+			model: "gpt-5.4",
+			system: "Call tools when needed.",
+			stream: false,
+			temperature: 0,
+			maxRetries: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Fetch a report.",
+					timestamp: 1,
+				},
+			],
+			tools: [
+				{
+					name: "fetch_report",
+					description: "Fetches one report.",
+					inputSchema: Schema.Struct({
+						reportId: Schema.String,
+					}),
+				},
+			],
+		};
+
+		expect(compileRequest(request)).toEqual({
+			model: "gpt-5.4",
+			instructions: "Call tools when needed.",
+			input: [
+				{
+					role: "user",
+					content: "Fetch a report.",
+				},
+			],
+			tools: [
+				{
+					type: "function",
+					name: "fetch_report",
+					description: "Fetches one report.",
+					parameters: {
+						$schema: "http://json-schema.org/draft-07/schema#",
+						type: "object",
+						required: ["reportId"],
+						properties: {
+							reportId: {
+								type: "string",
+							},
+						},
+						additionalProperties: false,
+					},
+					strict: true,
+				},
+			],
+			stream: false,
+			store: false,
+		});
+	});
+
+	test("passes JSON Schema tool inputs through unchanged", () => {
+		const inputSchema = {
+			type: "object",
+			properties: {
+				path: {
+					type: "string",
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		};
+
+		const request: appRequestShape = {
+			provider: "openai-codex",
+			model: "gpt-5.4",
+			system: "Use the tool.",
+			stream: false,
+			temperature: 0,
+			maxRetries: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Read one file.",
+					timestamp: 1,
+				},
+			],
+			tools: [
+				{
+					name: "read_file",
+					description: "Reads one file.",
+					inputSchema,
+				},
+			],
+		};
+
+		expect(compileRequest(request).tools).toEqual([
+			{
+				type: "function",
+				name: "read_file",
+				description: "Reads one file.",
+				parameters: inputSchema,
+				strict: true,
+			},
+		]);
+	});
+
+	test("normalizes plain JSON Schema objects for strict function calling", () => {
+		const request: appRequestShape = {
+			provider: "openai-codex",
+			model: "gpt-5.4",
+			system: "Use the tool.",
+			stream: false,
+			temperature: 0,
+			maxRetries: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Search for one report.",
+					timestamp: 1,
+				},
+			],
+			tools: [
+				{
+					name: "search_reports",
+					description: "Searches reports.",
+					inputSchema: {
+						type: "object",
+						properties: {
+							query: {
+								type: "string",
+							},
+							page: {
+								type: "number",
+							},
+						},
+					},
+				},
+			],
+		};
+
+		expect(compileRequest(request).tools?.[0]?.parameters).toEqual({
+			type: "object",
+			properties: {
+				query: {
+					type: "string",
+				},
+				page: {
+					type: "number",
+				},
+			},
+			required: ["query", "page"],
+			additionalProperties: false,
+		});
+	});
+
+	test("converts JS or TS object shorthand into strict JSON Schema", () => {
+		const request: appRequestShape = {
+			provider: "openai-codex",
+			model: "gpt-5.4",
+			system: "Use the tool.",
+			stream: false,
+			temperature: 0,
+			maxRetries: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Create one contact.",
+					timestamp: 1,
+				},
+			],
+			tools: [
+				{
+					name: "create_contact",
+					description: "Creates one contact.",
+					inputSchema: {
+						name: String,
+						age: Number,
+						active: Boolean,
+						createdAt: Date,
+						tags: [String] as const,
+						address: {
+							city: String,
+						},
+					},
+				},
+			],
+		};
+
+		expect(compileRequest(request).tools?.[0]?.parameters).toEqual({
+			type: "object",
+			properties: {
+				name: {
+					type: "string",
+				},
+				age: {
+					type: "number",
+				},
+				active: {
+					type: "boolean",
+				},
+				createdAt: {
+					type: "string",
+					format: "date-time",
+				},
+				tags: {
+					type: "array",
+					items: {
+						type: "string",
+					},
+				},
+				address: {
+					type: "object",
+					properties: {
+						city: {
+							type: "string",
+						},
+					},
+					required: ["city"],
+					additionalProperties: false,
+				},
+			},
+			required: ["name", "age", "active", "createdAt", "tags", "address"],
+			additionalProperties: false,
+		});
+	});
+
+	test("rejects unsupported tool schema inputs", () => {
+		const request = {
+			provider: "openai-codex",
+			model: "gpt-5.4",
+			system: "Use the tool.",
+			stream: false,
+			temperature: 0,
+			maxRetries: 1,
+			messages: [
+				{
+					role: "user",
+					content: "Read one file.",
+					timestamp: 1,
+				},
+			],
+			tools: [
+				{
+					name: "read_file",
+					description: "Reads one file.",
+					inputSchema: "not-a-schema",
+				},
+			],
+		} as appRequestShape;
+
+		expect(() => compileRequest(request)).toThrow(
+			'Tool "read_file" has an unsupported input schema. Supported inputs are JSON Schema objects, Zod schemas, Effect schemas, and JS/TS object shorthand.',
+		);
 	});
 });

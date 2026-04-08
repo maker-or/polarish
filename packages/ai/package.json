@@ -30,11 +30,18 @@
 		"prepublishOnly": "bun run lint && bun run typecheck && bun run build"
 	},
 	"peerDependencies": {
-		"typescript": "^5"
+		"typescript": "^5",
+		"zod": "^3.25 || ^4"
+	},
+	"peerDependenciesMeta": {
+		"zod": {
+			"optional": true
+		}
 	},
 	"dependencies": {
 		"effect": "^3.19.19",
-		"openai": "^6.32.0"
+		"openai": "^6.32.0",
+		"zod-to-json-schema": "^3.25.1"
 	},
 	"devDependencies": {
 		"@types/bun": "latest"
