@@ -84,6 +84,7 @@ export type CredentialProvider = ProviderType;
 
 export const OpenAIRefreshTokenResponse = Schema.Struct({
 	access_token: Schema.String,
+	refresh_token: Schema.optional(Schema.String),
 });
 
 export type OpenAIRefreshTokenResponse = Schema.Schema.Type<

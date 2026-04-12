@@ -96,6 +96,14 @@ type UpstreamPayload =
 	| Uint8Array
 	| object;
 
+/**
+ * This is the rotated token pair that the machine can return after a refresh.
+ */
+type RotatedSessionTokens = {
+	accessToken: string;
+	refreshToken: string;
+};
+
 function hashString(value: string): number {
 	let hash = 0;
 	for (let i = 0; i < value.length; i += 1) {
@@ -353,6 +361,7 @@ async function* parseCodexEvents(
  */
 async function collectUnifiedResponse(
 	body: UpstreamPayload,
+	sessionTokens?: RotatedSessionTokens,
 ): Promise<UnifiedResponseType> {
 	let acc = emptyAccumulator();
 
@@ -366,7 +375,10 @@ async function collectUnifiedResponse(
 		});
 	}
 
-	return toUnifiedSnapshot(acc);
+	return {
+		...toUnifiedSnapshot(acc),
+		...(sessionTokens ? { sessionTokens } : {}),
+	};
 }
 
 /**
@@ -375,7 +387,11 @@ async function collectUnifiedResponse(
 function createUnifiedStreamingResponse(
 	body: UpstreamPayload,
 	headers: Headers,
-	options: { runId: string; tools: AppRequestShapeType["tools"] },
+	options: {
+		runId: string;
+		tools: AppRequestShapeType["tools"];
+		sessionTokens?: RotatedSessionTokens;
+	},
 ): Response {
 	const approvalByToolName = approvalToolConfigFromRequest(options.tools);
 	const toolCallStartSent = new Set<string>();
@@ -403,7 +419,22 @@ function createUnifiedStreamingResponse(
 						reasoningTextStarted,
 					});
 					for (const frame of frames) {
-						controller.enqueue(encodeSseEvent(frame.type, frame));
+						const frameWithSessionTokens =
+							frame.type === "done" && options.sessionTokens
+								? {
+										...frame,
+										message: {
+											...frame.message,
+											sessionTokens: options.sessionTokens,
+										},
+									}
+								: frame;
+						controller.enqueue(
+							encodeSseEvent(
+								frameWithSessionTokens.type,
+								frameWithSessionTokens,
+							),
+						);
 					}
 				}
 
@@ -758,6 +789,21 @@ function sendUpstream(
 							initialResponse.status !== 401 &&
 							initialResponse.status !== 403
 						) {
+							if (credential.refresh_token) {
+								const sessionTokens: RotatedSessionTokens = {
+									accessToken: credential.accessToken,
+									refreshToken: credential.refresh_token,
+								};
+
+								return {
+									...initialResponse,
+									headers: {
+										...initialResponse.headers,
+										"x-machine-session-tokens": JSON.stringify(sessionTokens),
+									},
+								};
+							}
+
 							return initialResponse;
 						}
 
@@ -808,7 +854,22 @@ function sendUpstream(
 								}),
 						);
 
-						return yield* sendToUpstream(refreshedTokenData.access_token);
+						const retryResponse = yield* sendToUpstream(
+							refreshedTokenData.access_token,
+						);
+						const sessionTokens: RotatedSessionTokens = {
+							accessToken: refreshedTokenData.access_token,
+							refreshToken:
+								refreshedTokenData.refresh_token ?? credential.refresh_token,
+						};
+
+						return {
+							...retryResponse,
+							headers: {
+								...retryResponse.headers,
+								"x-machine-session-tokens": JSON.stringify(sessionTokens),
+							},
+						};
 					});
 
 				default:
@@ -852,16 +913,22 @@ function sendUpstream(
 			passthroughHeaders.set("x-trace-id", context.traceId);
 		}
 		passthroughHeaders.set("x-machine-request-id", context.requestId);
+		const sessionTokensHeader = res.headers["x-machine-session-tokens"];
+		const sessionTokens =
+			typeof sessionTokensHeader === "string"
+				? (JSON.parse(sessionTokensHeader) as RotatedSessionTokens)
+				: undefined;
 
 		if (request.stream) {
 			return createUnifiedStreamingResponse(res.data, passthroughHeaders, {
 				runId: context.requestId,
 				tools: request.tools,
+				...(sessionTokens ? { sessionTokens } : {}),
 			});
 		}
 
 		const finalResponse = yield* Effect.tryPromise({
-			try: () => collectUnifiedResponse(res.data),
+			try: () => collectUnifiedResponse(res.data, sessionTokens),
 			catch: (cause) =>
 				new UpstreamError({
 					message: `Failed to map upstream response: ${stringifyUnknown(cause)}`,

@@ -374,6 +374,14 @@ export const ProviderMetadata = Schema.Struct({
 });
 
 /**
+ * This is the rotated session token pair that callers can persist after a run.
+ */
+export const SessionTokens = Schema.Struct({
+	accessToken: Schema.String,
+	refreshToken: Schema.String,
+});
+
+/**
  * This is the single response shape that callers can trust from the SDK.
  * It keeps the final text, visible content parts, tool calls, and request status.
  */
@@ -387,6 +395,7 @@ export const UnifiedResponse = Schema.Struct({
 	usage: Schema.optional(Usage),
 	finishReason: Schema.optional(ResponseFinishReason),
 	providerMetadata: Schema.optional(ProviderMetadata),
+	sessionTokens: Schema.optional(SessionTokens),
 	warnings: Schema.Array(Schema.String),
 	errorMessage: Schema.optional(Schema.String),
 });
@@ -420,6 +429,7 @@ export type ResponseReasoningPart = typeof ResponseReasoningPart.Type;
 export type ResponseToolCallPart = typeof ResponseToolCallPart.Type;
 export type ResponseContentPart = typeof ResponseContentPart.Type;
 export type ProviderMetadata = typeof ProviderMetadata.Type;
+export type SessionTokens = typeof SessionTokens.Type;
 export type UnifiedResponse = typeof UnifiedResponse.Type;
 
 /**
@@ -590,6 +600,10 @@ export type CreateClientOptions = {
 	clientId: string;
 	clientSecret: string;
 	baseUrl?: string;
+	/**
+	 * This runs after the SDK learns about a fresh access token and refresh token pair.
+	 */
+	onSessionTokens?: (tokens: SessionTokens) => void | Promise<void>;
 };
 
 /**

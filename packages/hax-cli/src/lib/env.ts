@@ -68,3 +68,17 @@ export function getConvexUrl(): string {
 	}
 	return convexUrl;
 }
+
+/**
+ * Convex HTTP site URL from `VITE_CONVEX_SITE_URL` or `NEXT_PUBLIC_CONVEX_SITE_URL`.
+ */
+export function getConvexSiteUrl(): URL {
+	const convexSiteUrl =
+		process.env.VITE_CONVEX_SITE_URL ?? process.env.NEXT_PUBLIC_CONVEX_SITE_URL;
+	if (!convexSiteUrl) {
+		throw new Error(
+			"VITE_CONVEX_SITE_URL or NEXT_PUBLIC_CONVEX_SITE_URL must be set for Convex HTTP routes.",
+		);
+	}
+	return new URL(convexSiteUrl);
+}

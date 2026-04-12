@@ -138,6 +138,134 @@ describe("create", () => {
 		}
 	});
 
+	test("persists rotated session tokens from the final machine response", async () => {
+		const seenTokens: { accessToken: string; refreshToken: string }[] = [];
+		const seenAuthHeaders: string[] = [];
+
+		globalThis.fetch = (async (input, init) => {
+			const url = String(input);
+			expect(url).toBe("https://example.com/api/v1/chat/completions");
+
+			const headers = new Headers(init?.headers);
+			seenAuthHeaders.push(headers.get("authorization") ?? "");
+
+			return Response.json({
+				...finalResponse,
+				sessionTokens: {
+					accessToken: "server-rotated-token",
+					refreshToken: "server-rotated-refresh-token",
+				},
+			});
+		}) as typeof globalThis.fetch;
+
+		const client = create({
+			accessToken: "access-token",
+			refreshToken: "refresh-token",
+			clientId: "client-id",
+			clientSecret: "client-secret",
+			baseUrl: "https://example.com",
+			onSessionTokens: async (tokens) => {
+				seenTokens.push(tokens);
+			},
+		});
+
+		await client.generate(request);
+		await client.generate(request);
+
+		expect(seenTokens).toEqual([
+			{
+				accessToken: "server-rotated-token",
+				refreshToken: "server-rotated-refresh-token",
+			},
+			{
+				accessToken: "server-rotated-token",
+				refreshToken: "server-rotated-refresh-token",
+			},
+		]);
+		expect(seenAuthHeaders).toEqual([
+			"Bearer access-token",
+			"Bearer server-rotated-token",
+		]);
+	});
+
+	test("updates session tokens from the streaming done event", async () => {
+		const seenTokens: { accessToken: string; refreshToken: string }[] = [];
+		const seenAuthHeaders: string[] = [];
+		const streamingRequest = { ...request, stream: true } as const;
+
+		globalThis.fetch = (async (input, init) => {
+			const url = String(input);
+			expect(url).toBe("https://example.com/api/v1/chat/completions");
+
+			const headers = new Headers(init?.headers);
+			seenAuthHeaders.push(headers.get("authorization") ?? "");
+
+			return new Response(
+				[
+					"event: done",
+					`data: ${JSON.stringify({
+						type: "done",
+						reason: "stop",
+						message: {
+							...finalResponse,
+							sessionTokens: {
+								accessToken: "stream-rotated-token",
+								refreshToken: "stream-rotated-refresh-token",
+							},
+						},
+					})}`,
+					"",
+				].join("\n"),
+				{
+					status: 200,
+					headers: {
+						"content-type": "text/event-stream",
+					},
+				},
+			);
+		}) as typeof globalThis.fetch;
+
+		const client = create({
+			accessToken: "access-token",
+			refreshToken: "refresh-token",
+			clientId: "client-id",
+			clientSecret: "client-secret",
+			baseUrl: "https://example.com",
+			onSessionTokens: async (tokens) => {
+				seenTokens.push(tokens);
+			},
+		});
+
+		const first = await client.generate(streamingRequest);
+		expect(first.stream).toBe(true);
+		if (first.stream) {
+			for await (const _event of first.events) {
+				// consume the stream so the done event is applied
+			}
+		}
+
+		const second = await client.generate(streamingRequest);
+		expect(second.stream).toBe(true);
+		if (second.stream) {
+			await second.final();
+		}
+
+		expect(seenTokens).toEqual([
+			{
+				accessToken: "stream-rotated-token",
+				refreshToken: "stream-rotated-refresh-token",
+			},
+			{
+				accessToken: "stream-rotated-token",
+				refreshToken: "stream-rotated-refresh-token",
+			},
+		]);
+		expect(seenAuthHeaders).toEqual([
+			"Bearer access-token",
+			"Bearer stream-rotated-token",
+		]);
+	});
+
 	test("falls back to the default base url when baseUrl is omitted", async () => {
 		globalThis.fetch = (async (input) => {
 			expect(input).toBe(

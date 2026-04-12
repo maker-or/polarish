@@ -1,6 +1,4 @@
-import { ConvexHttpClient } from "convex/browser";
-import type { FunctionReference } from "convex/server";
-import { getConvexUrl } from "./env.js";
+import { getConvexSiteUrl } from "./env.js";
 import {
 	getValidAccessToken,
 	isEndedDesktopSessionError,
@@ -19,14 +17,55 @@ type OpenAiIdTokenClaims = {
 	chatgpt_user_id: string;
 };
 
-async function loadConvexApi(): Promise<{
-	aicrendital: { createCredential: unknown };
-}> {
-	const url = new URL("../../../../convex/_generated/api.js", import.meta.url);
-	const mod = (await import(url.href)) as {
-		api: { aicrendital: { createCredential: unknown } };
-	};
-	return mod.api;
+/**
+ * This type is the shape of the normalized provider credential payload that the CLI sends to the Convex HTTP route.
+ */
+type CliCredentialStorageInput = {
+	provider: "openai-codex";
+	provider_subscriptionType: string;
+	provider_user_id: string;
+	provider_account_id: string;
+	provider_sub_active_start: string;
+	provider_sub_active_until: string;
+	accessToken: string;
+	token_id: string | undefined;
+	refresh_token: string;
+	expiresAt: number;
+};
+
+/**
+ * This function posts the normalized provider credential payload to Convex over HTTP.
+ * This is the shape of the request that we are expecting: provider metadata, access token, refresh token, token id, and expiry.
+ */
+async function postCredentialToConvexHttp(
+	authToken: string,
+	input: CliCredentialStorageInput,
+) {
+	const url = new URL("/cli-credentials", getConvexSiteUrl());
+	const response = await fetch(url, {
+		method: "POST",
+		headers: {
+			authorization: `Bearer ${authToken}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify(input),
+	});
+
+	const result = (await response.json().catch(() => null)) as {
+		detail?: string;
+		error?: string;
+		ok?: boolean;
+	} | null;
+
+	if (!response.ok) {
+		throw new Error(
+			result?.detail ??
+				result?.error ??
+				`Credential storage failed with status ${response.status}.`,
+		);
+	}
+
+	return result;
 }
 
 /**
@@ -44,29 +83,20 @@ export async function storeChatGPTCredentialInConvex(input: {
 	provider_sub_active_start: string;
 	provider_sub_active_until: string;
 }) {
-	const api = await loadConvexApi();
-	const convex = new ConvexHttpClient(getConvexUrl());
+	const payload: CliCredentialStorageInput = {
+		provider: "openai-codex",
+		provider_subscriptionType: input.provider_subscriptionType,
+		provider_user_id: input.provider_user_id,
+		provider_account_id: input.provider_account_id,
+		provider_sub_active_start: input.provider_sub_active_start,
+		provider_sub_active_until: input.provider_sub_active_until,
+		accessToken: input.accessToken,
+		token_id: input.token_id,
+		refresh_token: input.refreshToken,
+		expiresAt: input.expiresAt,
+	};
 	const runMutation = async (authToken: string) => {
-		convex.setAuth(authToken);
-		const args = {
-			provider: "openai-codex" as const,
-			provider_subscriptionType: input.provider_subscriptionType,
-			provider_user_id: input.provider_user_id,
-			provider_account_id: input.provider_account_id,
-			provider_sub_active_start: input.provider_sub_active_start,
-			provider_sub_active_until: input.provider_sub_active_until,
-			accessToken: input.accessToken,
-			token_id: input.token_id,
-			refresh_token: input.refreshToken,
-			expiresAt: input.expiresAt,
-		};
-		const ref = api.aicrendital.createCredential as FunctionReference<
-			"mutation",
-			"public",
-			typeof args,
-			unknown
-		>;
-		return convex.mutation(ref, args);
+		return postCredentialToConvexHttp(authToken, payload);
 	};
 
 	const cachedAuth = await readHaxAuth();

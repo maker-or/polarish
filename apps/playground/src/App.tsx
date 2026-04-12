@@ -8,6 +8,7 @@ function App() {
 	const [traceLogs, setTraceLogs] = useState<string[]>([]);
 	const [finalJson, setFinalJson] = useState("");
 	const [errorJson, setErrorJson] = useState("");
+	const [sessionJson, setSessionJson] = useState("");
 	const [isRunning, setIsRunning] = useState(false);
 
 	const run = async () => {
@@ -17,10 +18,10 @@ function App() {
 		setTraceLogs([]);
 		setFinalJson("");
 		setErrorJson("");
+		setSessionJson("");
 
 		try {
 			await runPlaygroundRequest(
-
 				{ latestMessage: message },
 				{
 					onTrace: (message: string) => {
@@ -34,6 +35,9 @@ function App() {
 					},
 					onDone: (event: { message: unknown }) => {
 						setFinalJson(JSON.stringify(event.message, null, 2));
+					},
+					onSessionTokens: (tokens: unknown) => {
+						setSessionJson(JSON.stringify(tokens, null, 2));
 					},
 					onError: (event: { error: unknown }) => {
 						setErrorJson(JSON.stringify(event.error, null, 2));
@@ -88,6 +92,11 @@ function App() {
 			<section>
 				<h2>Final</h2>
 				<pre>{finalJson}</pre>
+			</section>
+
+			<section>
+				<h2>Session Tokens</h2>
+				<pre>{sessionJson}</pre>
 			</section>
 
 			<section>

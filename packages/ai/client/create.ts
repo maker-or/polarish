@@ -1,6 +1,13 @@
 import { Effect } from "effect";
 import type { appRequestShape } from "../providers/openai-codex/types.ts";
-import type { CreateClientOptions, UnifiedGenerateResult } from "../types.ts";
+import type {
+	CreateClientOptions,
+	SessionTokens,
+	UnifiedGenerateResult,
+	UnifiedResponse,
+	UnifiedResponseStreamingResult,
+	UnifiedStreamEventType,
+} from "../types.ts";
 import { generate } from "./generate.ts";
 import { refreshAccessToken as refreshTokens } from "./refresh-access-token.ts";
 
@@ -10,6 +17,14 @@ import { refreshAccessToken as refreshTokens } from "./refresh-access-token.ts";
  */
 export type Client = {
 	generate(request: appRequestShape): Promise<UnifiedGenerateResult>;
+};
+
+type SessionUpdateHandlers = {
+	setAccessToken: (value: string) => void;
+	setRefreshToken: (value: string) => void;
+	onSessionTokens:
+		| ((tokens: SessionTokens) => void | Promise<void>)
+		| undefined;
 };
 
 const DEFAULT_BASE_URL = "https://your-default-polaris-url";
@@ -27,6 +42,51 @@ function resolveEndpoint(baseUrl?: string): string {
 	).toString();
 }
 
+/**
+ * This stores fresh tokens in memory and lets the caller persist them.
+ */
+async function applySessionTokens(
+	tokens: SessionTokens | undefined,
+	update: SessionUpdateHandlers,
+): Promise<void> {
+	if (!tokens) {
+		return;
+	}
+
+	update.setAccessToken(tokens.accessToken);
+	update.setRefreshToken(tokens.refreshToken);
+	await update.onSessionTokens?.(tokens);
+}
+
+/**
+ * This wraps stream handles so rotated tokens are applied on `done` and `final()`.
+ */
+function withSessionTracking(
+	result: UnifiedResponseStreamingResult,
+	update: SessionUpdateHandlers,
+): UnifiedResponseStreamingResult {
+	const trackedEvents: AsyncIterable<UnifiedStreamEventType> = {
+		async *[Symbol.asyncIterator]() {
+			for await (const event of result.events) {
+				if (event.type === "done") {
+					await applySessionTokens(event.message.sessionTokens, update);
+				}
+				yield event;
+			}
+		},
+	};
+
+	return {
+		...result,
+		events: trackedEvents,
+		async final(): Promise<UnifiedResponse> {
+			const response = await result.final();
+			await applySessionTokens(response.sessionTokens, update);
+			return response;
+		},
+	};
+}
+
 export function create(options: CreateClientOptions): Client {
 	let accessToken = options.accessToken.trim();
 
@@ -37,6 +97,15 @@ export function create(options: CreateClientOptions): Client {
 	let refreshToken = options.refreshToken.trim();
 
 	const endpoint = resolveEndpoint(options.baseUrl);
+	const update = {
+		setAccessToken: (value: string) => {
+			accessToken = value;
+		},
+		setRefreshToken: (value: string) => {
+			refreshToken = value;
+		},
+		onSessionTokens: options.onSessionTokens,
+	};
 
 	const runGenerate = (
 		request: appRequestShape,
@@ -77,14 +146,24 @@ export function create(options: CreateClientOptions): Client {
 			}),
 		);
 
-		accessToken = refreshed.accessToken;
-		refreshToken = refreshed.refreshToken ?? refreshToken;
+		await applySessionTokens(
+			{
+				accessToken: refreshed.accessToken,
+				refreshToken: refreshed.refreshToken ?? refreshToken,
+			},
+			update,
+		);
 	};
 
 	return {
 		async generate(request: appRequestShape): Promise<UnifiedGenerateResult> {
 			try {
-				return await runGenerate(request);
+				const result = await runGenerate(request);
+				if (result.stream) {
+					return withSessionTracking(result, update);
+				}
+				await applySessionTokens(result.response.sessionTokens, update);
+				return result;
 			} catch (error) {
 				if (!isExpiredAccessTokenError(error)) {
 					throw error;
@@ -98,7 +177,12 @@ export function create(options: CreateClientOptions): Client {
 					);
 				}
 
-				return runGenerate(request);
+				const retried = await runGenerate(request);
+				if (retried.stream) {
+					return withSessionTracking(retried, update);
+				}
+				await applySessionTokens(retried.response.sessionTokens, update);
+				return retried;
 			}
 		},
 	};

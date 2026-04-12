@@ -343,6 +343,10 @@ describe("handleRequest", () => {
 				messageId: "msg_789",
 				model: "gpt-5.4",
 			},
+			sessionTokens: {
+				accessToken: "access-token",
+				refreshToken: "refresh-token",
+			},
 			warnings: [],
 		});
 	});
@@ -383,7 +387,10 @@ describe("handleRequest", () => {
 			if (url === "https://auth.openai.com/oauth/token") {
 				return {
 					status: 200,
-					data: { access_token: "refreshed-token" },
+					data: {
+						access_token: "refreshed-token",
+						refresh_token: "rotated-refresh-token",
+					},
 					headers: {},
 				};
 			}
@@ -409,6 +416,10 @@ describe("handleRequest", () => {
 		const response = await Effect.runPromise(handleRequest(headers, request));
 
 		expect(response.status).toBe(200);
-		expect(await response.text()).toContain('"delta":"Hello again"');
+		const body = await response.text();
+		expect(body).toContain('"delta":"Hello again"');
+		expect(body).toContain(
+			'"sessionTokens":{"accessToken":"refreshed-token","refreshToken":"rotated-refresh-token"}',
+		);
 	});
 });
