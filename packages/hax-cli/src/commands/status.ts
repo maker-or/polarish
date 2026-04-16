@@ -1,14 +1,15 @@
 import { Command, Flags } from "@oclif/core";
+import { readBridgeConfig } from "../lib/bridge-config.js";
 import { loadRepoEnv } from "../lib/env.js";
-import { getHaxAuthSnapshot } from "../lib/hax-session.js";
+import { getBridgeConfigJsonPath } from "../lib/paths.js";
 
 /**
- * Prints a sanitized view of the stored Hax session (no secrets).
+ * Prints the local bridge config and the origins currently allowed to call it.
  */
 export default class Status extends Command {
 	static override id = "status";
 
-	static override description = "Show local Hax session status";
+	static override description = "Show local bridge status";
 
 	static override flags = {
 		"no-update-notifier": Flags.boolean({
@@ -28,24 +29,22 @@ export default class Status extends Command {
 		}
 
 		loadRepoEnv();
-		const snap = await getHaxAuthSnapshot();
+		const config = await readBridgeConfig();
+		const filePath = getBridgeConfigJsonPath();
 
 		if (flags.json) {
-			this.log(
-				JSON.stringify(
-					{ filePath: snap.filePath, storedAuth: snap.storedAuth },
-					null,
-					2,
-				),
-			);
+			this.log(JSON.stringify({ config, filePath }, null, 2));
 			return;
 		}
 
-		this.log(`Auth file: ${snap.filePath}`);
-		if (snap.storedAuth?.user && typeof snap.storedAuth.user === "object") {
-			this.log(`User: ${JSON.stringify(snap.storedAuth.user)}`);
-		} else {
-			this.log("No user metadata stored.");
-		}
+		this.log(`Bridge config: ${filePath}`);
+		this.log(`Port: ${config.server.port}`);
+		this.log(
+			`Allowed origins: ${
+				config.security.allowedOrigins.length > 0
+					? config.security.allowedOrigins.join(", ")
+					: "(localhost only)"
+			}`,
+		);
 	}
 }

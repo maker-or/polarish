@@ -9,19 +9,18 @@ TypeScript SDK for a **unified chat API**: one request shape (`appRequestShape`)
 1. [Who this is for](#who-this-is-for)
 2. [Installation & dependencies](#installation--dependencies)
 3. [Create a client](#create-a-client)
-4. [Session tokens](#session-tokens)
-5. [Send a request](#send-a-request)
-6. [Request shape (`appRequestShape`)](#request-shape-apprequestshape)
-7. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
-8. [Defining tools](#defining-tools)
-9. [Tools and agent loops](#tools-and-agent-loops)
-10. [Backend & testing exports](#backend--testing-exports)
-11. [Errors & runtime](#errors--runtime)
-12. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
-13. [Non-streaming vs streaming results](#non-streaming-vs-streaming-results)
-14. [UnifiedResponse](#unifiedresponse)
-15. [TypeScript: stream events](#typescript-stream-events)
-16. [Streaming events reference](#streaming-events-reference)
+4. [Send a request](#send-a-request)
+5. [Request shape (`appRequestShape`)](#request-shape-apprequestshape)
+6. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
+7. [Defining tools](#defining-tools)
+8. [Tools and agent loops](#tools-and-agent-loops)
+9. [Backend & testing exports](#backend--testing-exports)
+10. [Errors & runtime](#errors--runtime)
+11. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
+12. [Non-streaming vs streaming results](#non-streaming-vs-streaming-results)
+13. [UnifiedResponse](#unifiedresponse)
+14. [TypeScript: stream events](#typescript-stream-events)
+15. [Streaming events reference](#streaming-events-reference)
 
 ---
 
@@ -30,8 +29,8 @@ TypeScript SDK for a **unified chat API**: one request shape (`appRequestShape`)
 
 | You are…                                                                  | Start here                                                                                                                                                                                    |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Building an app** that talks to your deployed machine API               | `[create()](#create-a-client)` → `client.generate()`, `[appRequestShape](#request-shape-apprequestshape)`, [tools & loops](#tools-and-agent-loops), [streaming](#streaming-events-reference). |
-| **Implementing or adapting the HTTP machine** (proxy, tests, custom auth) | `[generate()](#send-a-request)` (low-level), `[compileRequest](#backend--testing-exports)`, Codex bridge helpers in [Backend & testing exports](#backend--testing-exports).                   |
+| **Building an app** that talks to your local bridge                      | `[create()](#create-a-client)` → `client.generate()`, `[appRequestShape](#request-shape-apprequestshape)`, [tools & loops](#tools-and-agent-loops), [streaming](#streaming-events-reference). |
+| **Implementing or adapting the bridge transport**                        | `[generate()](#send-a-request)` (low-level), `[compileRequest](#backend--testing-exports)`, Codex bridge helpers in [Backend & testing exports](#backend--testing-exports).                   |
 
 
 The generic `requestShape` in `types.ts` documents the broader message/history union. `**generate` and `client.generate` only accept `appRequestShape`** today (`provider: "openai-codex"` + `model` from the Codex model list).
@@ -54,46 +53,18 @@ bun add @polarish/ai
 
 `create(options)` returns a `Client` with a single method: `generate(request)` where `request` matches `appRequestShape`.
 
-- **Endpoint:** `POST` `{baseUrl}/api/v1/chat/completions` (trailing slash on `baseUrl` is optional).
-- **Auth:** `Authorization: Bearer {accessToken}` on every request.
-- **401 / expired access:** if `refreshToken`, `clientId`, and `clientSecret` are set, the client refreshes OAuth, updates in-memory tokens, calls `onSessionTokens` when provided, then **retries the request once**.
-
-Set a real `**baseUrl`** for your API. If you omit it, the SDK falls back to an internal placeholder origin—**not** suitable for production.
+- **Endpoint:** `POST` `{baseUrl}/v1/generate` (trailing slash on `baseUrl` is optional).
+- **Default base URL:** `http://127.0.0.1:4318` for the local bridge.
+- **Streaming:** keep using the same request shape and set `stream: true`; the bridge responds with SSE.
 
 ```ts
 import { create } from "@polarish/ai";
 
 const client = create({
-  accessToken: process.env.POLARISH_ACCESS_TOKEN!,
-  refreshToken: process.env.POLARISH_REFRESH_TOKEN!,
-  clientId: process.env.POLARISH_CLIENT_ID!,
-  clientSecret: process.env.POLARISH_CLIENT_SECRET!,
-  /** Origin of your API (trailing slash optional). */
-  baseUrl: "https://api.example.com",
-  /**
-   * Called with `SessionTokens` whenever the SDK applies a new pair (from `response.sessionTokens`
-   * or after OAuth refresh). Persist both tokens.
-   */
-  onSessionTokens: async ({ accessToken, refreshToken }) => {
-    await saveTokens({ accessToken, refreshToken });
-  },
+  /** Origin of your local bridge (trailing slash optional). */
+  baseUrl: "http://127.0.0.1:4318",
 });
 ```
-
----
-
-## Session tokens
-
-When the backend returns `sessionTokens` on a completed run, persist them so the next request stays authenticated.
-
-
-| Mode                | When tokens are applied                                                                                                                                                    |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `**stream: false**` | `result.response.sessionTokens` after a successful JSON response.                                                                                                          |
-| `**stream: true**`  | On the terminal `done` event (`done.response.sessionTokens`), and again when you await `result.final()` (the client wraps the stream so both paths run `onSessionTokens`). |
-
-
-If you use the low-level `[generate()](#send-a-request)` without `create()`, you must apply `sessionTokens` yourself from the batch response or from `done` / `final()`.
 
 ---
 
@@ -115,7 +86,7 @@ const result = await client.generate({
 
 ### `generate` (low-level, same wire contract)
 
-Use this for **tests**, **custom headers**, or **token handling** outside `create()`:
+Use this for **tests**, **custom headers**, or **custom bridge transport** outside `create()`:
 
 ```ts
 import { generate } from "@polarish/ai";
@@ -131,8 +102,7 @@ const result = await generate(
     maxRetries: 2,
   },
   {
-    endpoint: "https://api.example.com/api/v1/chat/completions",
-    headers: { authorization: "Bearer …" },
+    endpoint: "http://127.0.0.1:4318/v1/generate",
   },
 );
 ```
@@ -318,7 +288,7 @@ const sumToolWithApproval = {
 1. Call streaming `generate` with `tools` that set `requiresApproval: true` where needed.
 2. `for await (const event of result.events)`. When `event.type === "approval_required"`, read `event.approval`: `id`, `runId`, `toolCallId`, `toolName`, `input`, `status: "pending"`, `rejectionMode`.
 3. In the UI, confirm or deny the action; record the choice.
-4. Approve or reject through **your** backend (there is no separate SDK `approve()` — the contract lives in your `POST /api/v1/chat/completions` stack). Typically POST `id` + `runId` + approved/rejected so the run resumes or fails.
+4. Approve or reject through **your** app/backend (there is no separate SDK `approve()` — the contract lives in your own tool loop around `POST /v1/generate`).
 5. After approval → server continues → consume SSE until `done` or the next `approval_required`. When tool calls are finalized locally, run `execute`, then `toolExecutionToMessage`, update history, and call `generate` again if another turn is needed.
 6. On rejection: `return_tool_error` sends an error to the model; `abort_run` stops the run — follow your `done` / `error` handling.
 
@@ -352,7 +322,7 @@ More: [Tools and agent loops](#tools-and-agent-loops), [Streaming events referen
 
 ## Backend & testing exports
 
-Useful when **implementing** the machine API, **adapting** Codex streaming, or building **model pickers** in the UI:
+Useful when **implementing** the local bridge transport, **adapting** Codex streaming, or building **model pickers** in the UI:
 
 
 | Export                                                                                 | Role                                                                                                                     |
@@ -474,7 +444,6 @@ Normalized final payload for batch and stream:
 | `approvals`                 | Pending / resolved approvals                               |
 | `usage` / `finishReason`    | Tokens + stop reason                                       |
 | `providerMetadata`          | Ids, model, raw finish                                     |
-| `sessionTokens`             | Rotated pair when the backend renews tokens                |
 | `warnings` / `errorMessage` | Soft warnings / error text                                 |
 | `object`                    | Optional opaque provider object / raw payload when present |
 

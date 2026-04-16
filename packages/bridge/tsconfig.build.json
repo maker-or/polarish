@@ -1,0 +1,19 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"allowImportingTsExtensions": false,
+		"verbatimModuleSyntax": true,
+		"preserveSymlinks": true,
+		"declaration": true,
+		"declarationMap": true,
+		"sourceMap": true,
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"tsBuildInfoFile": "./dist/.tsbuildinfo"
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["**/*.test.ts"]
+}

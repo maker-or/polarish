@@ -1,7 +1,7 @@
 {
 	"name": "@polarish/cli",
 	"version": "0.1.0",
-	"description": "Polarish CLI — help you to connect your existing ai subscriptions to your polarish account",
+	"description": "Polarish CLI — configure and run the local AI bridge",
 	"type": "module",
 	"homepage": "https://polarish.dev",
 	"repository": {
@@ -15,10 +15,10 @@
 		"cli",
 		"polarish",
 		"ai",
-		"chatgpt",
-		"copilot",
+		"bridge",
+		"localhost",
 		"openai",
-		"oauth"
+		"codex"
 	],
 	"files": ["bin", "dist", "public"],
 	"bin": {
@@ -43,6 +43,7 @@
 		"node": ">=20"
 	},
 	"dependencies": {
+		"@polarish/bridge": "workspace:*",
 		"@oclif/core": "^4.2.10",
 		"dotenv": "^16.4.7",
 		"inquirer": "^13.4.0",

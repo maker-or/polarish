@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.node.json",
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.electron.tsbuildinfo"
-  },
-  "include": ["electron/**/*.ts", "server/**/*.ts", "vite.config.ts"],
-  "exclude": ["electron/path.ts"]
-}

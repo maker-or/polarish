@@ -1,11 +1,20 @@
 # @polarish/cli
 
-<img src="./public/logo.svg" width="200" alt="Polarish CLI Logo" />
+Polarish CLI configures the local bridge that browser apps use to reach vendor runtimes like Codex on your machine.
 
-Polarish CLI — Run the below command to  Connect your AI subscriptions (like ChatGPT, Copilot, Gemini) to your Polarish account. and  access them from any tool that support the login with polarish
+## Common commands
+
+```bash
+polarish status
+polarish bridge run
+polarish origins list
+polarish origins add https://app.example.com
+polarish origins remove https://app.example.com
+```
 
 ## Installation
 
 ```bash
 bun add -g @polarish/cli
 ```
+

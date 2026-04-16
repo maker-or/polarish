@@ -1,50 +1,42 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import { Effect } from "effect";
-import type { AppRequestShapeType } from "../index.ts";
+import type {
+	AppRequestShapeType,
+	UnifiedGenerateResultType,
+} from "../index.ts";
 import { generate } from "./generate.ts";
 
-type AxiosArgs = [string, unknown?, Record<string, unknown>?];
-type AxiosResponse = {
-	status: number;
-	data: unknown;
-	headers: Record<string, string | undefined>;
-};
-
-let postImpl: (...args: AxiosArgs) => Promise<AxiosResponse>;
-let getImpl: (
-	url: string,
-	config?: Record<string, unknown>,
-) => Promise<AxiosResponse>;
-let getTokenClaimsImpl: (
-	token: string,
-) => Promise<{ sub: string; org_id?: string }>;
-
-const axiosPost = mock((...args: AxiosArgs) => postImpl(...args));
-const axiosGet = mock((url: string, config?: Record<string, unknown>) =>
-	getImpl(url, config),
+const executeCodexMock = mock(
+	async (
+		_request: AppRequestShapeType,
+	): Promise<UnifiedGenerateResultType> => ({
+		stream: false,
+		response: {
+			status: "completed",
+			text: "default mocked response",
+			content: [{ type: "text", text: "default mocked response" }],
+			toolCalls: [],
+			approvals: [],
+			finishReason: "stop",
+			providerMetadata: {
+				provider: "openai-codex",
+			},
+			warnings: [],
+		},
+	}),
 );
-const getTokenClaimsMock = mock((token: string) => getTokenClaimsImpl(token));
 
-mock.module("axios", () => {
-	const axios = {
-		post: (...args: AxiosArgs) => axiosPost(...args),
-		get: (url: string, config?: Record<string, unknown>) =>
-			axiosGet(url, config),
-	};
-
-	return {
-		default: axios,
-		post: axios.post,
-		get: axios.get,
-	};
-});
-
-mock.module("@workos-inc/authkit-nextjs", () => ({
-	getTokenClaims: (token: string) => getTokenClaimsMock(token),
+mock.module("../../../packages/bridge/src/codex.ts", () => ({
+	checkCodexAvailability: async () => ({
+		authenticated: true,
+		installed: true,
+	}),
+	executeCodex: (
+		request: AppRequestShapeType,
+	): Promise<UnifiedGenerateResultType> => executeCodexMock(request),
 }));
 
-const { handleRequest } = await import(
-	"../../../apps/web/app/machine/service.ts"
+const { handleBridgeRequest } = await import(
+	"../../../packages/bridge/src/server.ts"
 );
 
 const request: AppRequestShapeType = {
@@ -145,78 +137,76 @@ async function readTextStream(
 }
 
 beforeEach(() => {
-	axiosPost.mockClear();
-	axiosGet.mockClear();
-	getTokenClaimsMock.mockClear();
-	postImpl = async () => {
-		throw new Error("unconfigured axios.post mock");
-	};
-	getImpl = async () => {
-		throw new Error("unconfigured axios.get mock");
-	};
-	getTokenClaimsImpl = async (token) => {
-		expect(token).toBe("test-token");
-		return {
-			sub: "user-1",
-			org_id: "org_1",
-		};
-	};
+	executeCodexMock.mockClear();
 });
 
 describe("generate end-to-end", () => {
-	test("streams text and resolves final response through the machine layer", async () => {
-		postImpl = async (url) => {
-			if (url === "https://chatgpt.com/backend-api/codex/responses") {
-				return {
-					status: 200,
-					data: codexSseResponse({
-						responseId: "resp_e2e_1",
-						messageId: "msg_e2e_1",
-						model: "gpt-5.4",
-						delta: "Hello from e2e",
-					}),
-					headers: {
-						"content-type": "text/event-stream",
-					},
-				};
-			}
-
-			throw new Error(`unexpected post url: ${url}`);
-		};
-
-		getImpl = async () => ({
-			status: 200,
-			data: {
-				_id: "cred_1",
-				_creationTime: 1,
-				userId: "user-1",
-				orgId: "org_1",
-				provider: "openai-codex",
-				accessToken: "access-token",
-				refresh_token: "refresh-token",
-				updatedAt: 1,
+	test("streams text and resolves final response through the bridge layer", async () => {
+		executeCodexMock.mockImplementationOnce(async () => ({
+			stream: true,
+			textStream: new ReadableStream<string>({
+				start(controller) {
+					controller.enqueue("Hello from e2e");
+					controller.close();
+				},
+			}),
+			events: {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						type: "done",
+						reason: "stop",
+						response: {
+							status: "completed",
+							text: "Hello from e2e",
+							content: [{ type: "text", text: "Hello from e2e" }],
+							toolCalls: [],
+							approvals: [],
+							finishReason: "stop",
+							providerMetadata: {
+								provider: "openai-codex",
+								responseId: "resp_e2e_1",
+							},
+							warnings: [],
+						},
+					};
+				},
 			},
-			headers: {},
-		});
+			async final() {
+				return {
+					status: "completed",
+					text: "Hello from e2e",
+					content: [{ type: "text", text: "Hello from e2e" }],
+					toolCalls: [],
+					approvals: [],
+					finishReason: "stop",
+					providerMetadata: {
+						provider: "openai-codex",
+						responseId: "resp_e2e_1",
+					},
+					warnings: [],
+				};
+			},
+		}));
 
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_input, init) => {
-			const requestHeaders = new Headers(init?.headers);
-			const authorization = requestHeaders.get("authorization");
 			const body = JSON.parse(String(init?.body));
-			if (!authorization) {
-				throw new Error("missing authorization header");
-			}
-
-			return Effect.runPromise(handleRequest({ authorization }, body));
+			return handleBridgeRequest(
+				new Request("http://127.0.0.1:4318/v1/generate", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						origin: "http://localhost:3000",
+					},
+					body: JSON.stringify(body),
+				}),
+			);
 		}) as typeof globalThis.fetch;
 
 		try {
 			const result = await generate(request, {
-				endpoint: "https://example.com/v1/chat/completions",
-				headers: {
-					authorization: "Bearer test-token",
-				},
+				endpoint: "https://example.com/v1/generate",
+				headers: { origin: "http://localhost:3000" },
 			});
 
 			expect(result.stream).toBe(true);
@@ -234,51 +224,37 @@ describe("generate end-to-end", () => {
 		}
 	});
 
-	test("returns final JSON through the machine layer when stream is false", async () => {
-		postImpl = async (url) => {
-			if (url === "https://chatgpt.com/backend-api/codex/responses") {
-				return {
-					status: 200,
-					data: codexSseResponse({
-						responseId: "resp_e2e_2",
-						messageId: "msg_e2e_2",
-						model: "gpt-5.4",
-						delta: "Batch e2e response",
-					}),
-					headers: {
-						"content-type": "text/event-stream",
-					},
-				};
-			}
-
-			throw new Error(`unexpected post url: ${url}`);
-		};
-
-		getImpl = async () => ({
-			status: 200,
-			data: {
-				_id: "cred_1",
-				_creationTime: 1,
-				userId: "user-1",
-				orgId: "org_1",
-				provider: "openai-codex",
-				accessToken: "access-token",
-				refresh_token: "refresh-token",
-				updatedAt: 1,
+	test("returns final JSON through the bridge layer when stream is false", async () => {
+		executeCodexMock.mockImplementationOnce(async () => ({
+			stream: false,
+			response: {
+				status: "completed",
+				text: "Batch e2e response",
+				content: [{ type: "text", text: "Batch e2e response" }],
+				toolCalls: [],
+				approvals: [],
+				finishReason: "stop",
+				providerMetadata: {
+					provider: "openai-codex",
+					responseId: "resp_e2e_2",
+				},
+				warnings: [],
 			},
-			headers: {},
-		});
+		}));
 
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_input, init) => {
-			const requestHeaders = new Headers(init?.headers);
-			const authorization = requestHeaders.get("authorization");
 			const body = JSON.parse(String(init?.body));
-			if (!authorization) {
-				throw new Error("missing authorization header");
-			}
-
-			return Effect.runPromise(handleRequest({ authorization }, body));
+			return handleBridgeRequest(
+				new Request("http://127.0.0.1:4318/v1/generate", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						origin: "http://localhost:3000",
+					},
+					body: JSON.stringify(body),
+				}),
+			);
 		}) as typeof globalThis.fetch;
 
 		try {
@@ -288,10 +264,8 @@ describe("generate end-to-end", () => {
 					stream: false,
 				},
 				{
-					endpoint: "https://example.com/v1/chat/completions",
-					headers: {
-						authorization: "Bearer test-token",
-					},
+					endpoint: "https://example.com/v1/generate",
+					headers: { origin: "http://localhost:3000" },
 				},
 			);
 

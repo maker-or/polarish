@@ -40,3 +40,9 @@ release/
 *.njsproj
 *.sln
 *.sw?
+
+#agents
+.agents
+
+# Cursor/agent lock files
+skills-lock.json

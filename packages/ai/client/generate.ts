@@ -13,7 +13,7 @@ type GenerateOptions = {
 };
 
 /**
- * This sends a unified chat request to your machine endpoint.
+ * This sends a unified chat request to your local bridge endpoint.
  * The request must match `appRequestShape` (OpenAI Codex today): include `provider: "openai-codex"` and a `model` from the Codex model list.
  */
 export function generate(

@@ -20,3 +20,10 @@ export function getHaxConfigDir(): string {
 export function getHaxAuthJsonPath(): string {
 	return path.join(getHaxConfigDir(), "hax-auth.json");
 }
+
+/**
+ * Path to the local bridge config file.
+ */
+export function getBridgeConfigJsonPath(): string {
+	return path.join(getHaxConfigDir(), "bridge.json");
+}

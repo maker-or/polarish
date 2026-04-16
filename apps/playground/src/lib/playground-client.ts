@@ -1,13 +1,5 @@
 import { create } from "@hax/ai";
-import type {
-	SessionTokensType,
-	ToolDefinitionType,
-	UnifiedResponseType,
-	UnifiedStreamEventPayload,
-} from "@hax/ai";
-import * as z from "zod";
-
-let latestSessionTokens: SessionTokensType | undefined;
+import type { UnifiedResponseType, UnifiedStreamEventPayload } from "@hax/ai";
 
 /**
  * This makes a timestamped trace message for debugging.
@@ -30,7 +22,6 @@ export type PlaygroundRunInput = {
 export type PlaygroundRequestHandlers = {
 	onTrace?: (message: string) => void;
 	onEvent?: (event: UnifiedStreamEventPayload) => void;
-	onSessionTokens?: (tokens: SessionTokensType) => void;
 	onStart?: (
 		event: Extract<UnifiedStreamEventPayload, { type: "start" }>,
 	) => void;
@@ -72,29 +63,8 @@ export type PlaygroundRequestHandlers = {
 	) => void;
 };
 
-export const sum: ToolDefinitionType = {
-	name: "sum",
-	description: "the purpose of this tool is too add two numbers",
-	requiresApproval: false,
-	retrySafe: true,
-	inputSchema: z.object({
-		a: z.number(),
-		b: z.number(),
-	}),
-	execute: async ({ a, b }: { a: number; b: number }) => {
-		return a + b;
-	},
-};
-
 const hax = create({
-	accessToken: import.meta.env.VITE_MACHINE_ACCESS_TOKEN ?? "",
-	refreshToken: import.meta.env.VITE_MACHINE_REFRESH_TOKEN ?? "",
-	clientId: import.meta.env.VITE_MACHINE_CLIENT_ID ?? "",
-	clientSecret: import.meta.env.VITE_MACHINE_CLIENT_SECRET ?? "",
-	baseUrl: import.meta.env.VITE_MACHINE_BASE_URL ?? "http://localhost:5173",
-	onSessionTokens: async (tokens) => {
-		latestSessionTokens = tokens;
-	},
+	baseUrl: import.meta.env.VITE_MACHINE_BASE_URL ?? "http://127.0.0.1:4318",
 });
 
 /**
@@ -109,19 +79,6 @@ export async function runPlaygroundRequest(
 		handlers.onTrace?.(message);
 		console.debug(message);
 	};
-	const emitSessionTokens = (tokens: SessionTokensType | undefined) => {
-		if (!tokens) {
-			return;
-		}
-
-		handlers.onSessionTokens?.(tokens);
-		emitTrace(
-			"session.updated",
-			`access=${tokens.accessToken.slice(0, 12)} refresh=${tokens.refreshToken.slice(0, 12)}`,
-		);
-	};
-
-	latestSessionTokens = undefined;
 
 	emitTrace("run.start", "initializing playground request");
 	emitTrace("request.built", `messages=${input.latestMessage}`);
@@ -134,7 +91,6 @@ export async function runPlaygroundRequest(
 		stream: true,
 		temperature: 0.7,
 		maxRetries: 2,
-		tools: [sum],
 		messages: [
 			{
 				role: "user",
@@ -147,7 +103,6 @@ export async function runPlaygroundRequest(
 
 	if (!result.stream) {
 		emitTrace("response.batch", "non-stream response path");
-		emitSessionTokens(result.response.sessionTokens);
 		const doneEvent = {
 			type: "done",
 			reason: "stop",
@@ -213,7 +168,6 @@ export async function runPlaygroundRequest(
 				break;
 			case "done":
 				handlers.onDone?.(event);
-				emitSessionTokens(event.response.sessionTokens ?? latestSessionTokens);
 				emitTrace("run.done", "stream done event received");
 				return event.response;
 			case "error":
@@ -227,7 +181,6 @@ export async function runPlaygroundRequest(
 
 	emitTrace("response.stream.final", "awaiting final response snapshot");
 	const final = await result.final();
-	emitSessionTokens(final.sessionTokens ?? latestSessionTokens);
 	emitTrace("run.done", "returned result.final()");
 	return final;
 }
