@@ -423,8 +423,8 @@ function createUnifiedStreamingResponse(
 							frame.type === "done" && options.sessionTokens
 								? {
 										...frame,
-										message: {
-											...frame.message,
+										response: {
+											...frame.response,
 											sessionTokens: options.sessionTokens,
 										},
 									}

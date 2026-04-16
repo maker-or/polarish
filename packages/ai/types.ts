@@ -445,7 +445,7 @@ export type UnifiedStreamDoneReasonType = typeof UnifiedStreamDoneReason.Type;
 
 /**
  * This is one live frame in the unified machine SSE stream.
- * Shape follows pi-mono `AssistantMessageEvent`: same event names and fields, with `UnifiedResponse` instead of `AssistantMessage` and `ResponseToolCallPart` instead of `ToolCall` on `toolcall_end`.
+ * Shape follows pi-mono `AssistantMessageEvent`: same event names and fields, with `UnifiedResponse` instead of `AssistantMessage` and `ResponseToolCallPart` instead of `ToolCall` on `toolcall_end`. The terminal `done` frame uses `response` (not `message`) for the final `UnifiedResponse`.
  * We add `approval_required` when a tool is marked `requiresApproval` in the request.
  */
 export const UnifiedStreamEventStart = Schema.Struct({
@@ -522,7 +522,10 @@ export const UnifiedStreamEventApprovalRequired = Schema.Struct({
 export const UnifiedStreamEventDone = Schema.Struct({
 	type: Schema.Literal("done"),
 	reason: UnifiedStreamDoneReason,
-	message: UnifiedResponse,
+	/**
+	 * This is the final {@link UnifiedResponse} for the run (same shape as `generate()` batch `response`).
+	 */
+	response: UnifiedResponse,
 });
 
 export const UnifiedStreamEventError = Schema.Struct({
@@ -550,7 +553,51 @@ export const UnifiedStreamEvent = Schema.Union(
 	UnifiedStreamEventError,
 );
 
-export type UnifiedStreamEventType = typeof UnifiedStreamEvent.Type;
+/**
+ * This is one decoded unified SSE frame. It is written as an explicit union of struct types so
+ * `event.type` stays a visible string-literal union in the IDE (better `switch` completion than
+ * relying only on `typeof UnifiedStreamEvent.Type` from Schema.Union).
+ */
+export type UnifiedStreamEventType =
+	| typeof UnifiedStreamEventStart.Type
+	| typeof UnifiedStreamEventTextStart.Type
+	| typeof UnifiedStreamEventTextDelta.Type
+	| typeof UnifiedStreamEventTextEnd.Type
+	| typeof UnifiedStreamEventThinkingStart.Type
+	| typeof UnifiedStreamEventThinkingDelta.Type
+	| typeof UnifiedStreamEventThinkingEnd.Type
+	| typeof UnifiedStreamEventToolcallStart.Type
+	| typeof UnifiedStreamEventToolcallDelta.Type
+	| typeof UnifiedStreamEventToolcallEnd.Type
+	| typeof UnifiedStreamEventApprovalRequired.Type
+	| typeof UnifiedStreamEventDone.Type
+	| typeof UnifiedStreamEventError.Type;
+
+/**
+ * This is the request shape for `event.type` on {@link UnifiedStreamEventType}; use it when you want
+ * autocomplete for `case` labels or for objects keyed by event kind.
+ */
+export type UnifiedStreamEventKind = UnifiedStreamEventType["type"];
+
+/**
+ * This lists every {@link UnifiedStreamEventKind} in stream order; `satisfies` fails the build if a
+ * variant is missing or renamed while the schema still lists it (or vice versa).
+ */
+export const UNIFIED_STREAM_EVENT_TYPE_VALUES = [
+	"start",
+	"text_start",
+	"text_delta",
+	"text_end",
+	"thinking_start",
+	"thinking_delta",
+	"thinking_end",
+	"toolcall_start",
+	"toolcall_delta",
+	"toolcall_end",
+	"approval_required",
+	"done",
+	"error",
+] as const satisfies readonly UnifiedStreamEventKind[];
 
 /**
  * This is the streaming handle before optional `events` is attached (internal stream pump).

@@ -33,8 +33,8 @@ function App() {
 					onTextDelta: (event: { delta: string }) => {
 						setOutput((prev) => prev + event.delta);
 					},
-					onDone: (event: { message: unknown }) => {
-						setFinalJson(JSON.stringify(event.message, null, 2));
+					onDone: (event: { response: unknown }) => {
+						setFinalJson(JSON.stringify(event.response, null, 2));
 					},
 					onSessionTokens: (tokens: unknown) => {
 						setSessionJson(JSON.stringify(tokens, null, 2));

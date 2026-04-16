@@ -1,5 +1,5 @@
 {
-	"name": "@hax/ai",
+	"name": "@polarish/ai",
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["dist/**/*.js", "dist/**/*.d.ts", "README.md"],

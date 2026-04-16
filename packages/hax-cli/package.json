@@ -1,15 +1,32 @@
 {
-	"name": "@hax/cli",
+	"name": "@polarish/cli",
 	"version": "0.1.0",
-	"description": "Hax CLI — Hax sign-in, provider connections, and Convex credentials",
+	"description": "Polarish CLI — help you to connect your existing ai subscriptions to your polarish account",
 	"type": "module",
-	"bin": {
-		"hax": "./bin/run.js"
+	"homepage": "https://polarish.dev",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/anomalyco/polarish.git"
 	},
-	"files": ["bin", "dist"],
+	"bugs": {
+		"url": "https://github.com/anomalyco/polarish/issues"
+	},
+	"keywords": [
+		"cli",
+		"polarish",
+		"ai",
+		"chatgpt",
+		"copilot",
+		"openai",
+		"oauth"
+	],
+	"files": ["bin", "dist", "public"],
+	"bin": {
+		"polarish": "./bin/run.js"
+	},
 	"oclif": {
-		"bin": "hax",
-		"dirname": "hax",
+		"bin": "polarish",
+		"dirname": "polarish",
 		"commands": "./dist/commands",
 		"topicSeparator": " ",
 		"hooks": {

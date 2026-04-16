@@ -27,7 +27,7 @@ type SessionUpdateHandlers = {
 		| undefined;
 };
 
-const DEFAULT_BASE_URL = "https://your-default-polaris-url";
+const DEFAULT_BASE_URL = "https://your-default-polarish-url";
 const MACHINE_ENDPOINT_PATH = "/api/v1/chat/completions";
 
 function ensureTrailingSlash(value: string): string {
@@ -68,8 +68,12 @@ function withSessionTracking(
 	const trackedEvents: AsyncIterable<UnifiedStreamEventType> = {
 		async *[Symbol.asyncIterator]() {
 			for await (const event of result.events) {
-				if (event.type === "done") {
-					await applySessionTokens(event.message.sessionTokens, update);
+				switch (event.type) {
+					case "done":
+						await applySessionTokens(event.response.sessionTokens, update);
+						break;
+					default:
+						break;
 				}
 				yield event;
 			}

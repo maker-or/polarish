@@ -230,11 +230,11 @@ function unifiedEventFromFrame(
 	}
 
 	if (frame.event === "final") {
-		const message = parsedJson as UnifiedResponse;
+		const response = parsedJson as UnifiedResponse;
 		return {
 			type: "done",
-			reason: unifiedStreamDoneReason(message.finishReason ?? "stop"),
-			message,
+			reason: unifiedStreamDoneReason(response.finishReason ?? "stop"),
+			response,
 		};
 	}
 
@@ -289,7 +289,7 @@ function applyUnifiedStreamEvent(
 			return;
 		}
 		case "done": {
-			controller.complete(event.message);
+			controller.complete(event.response);
 			return;
 		}
 		case "error": {

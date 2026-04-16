@@ -40,6 +40,7 @@ export {
 	UnifiedStreamEventToolcallDelta,
 	UnifiedStreamEventToolcallEnd,
 	UnifiedStreamEventToolcallStart,
+	UNIFIED_STREAM_EVENT_TYPE_VALUES,
 } from "./types.ts";
 
 export type {
@@ -72,6 +73,7 @@ export type {
 	UnifiedResponseStreamCoreResult as UnifiedResponseStreamCoreResultType,
 	UnifiedStreamDoneReasonType as UnifiedStreamDoneReasonPayload,
 	UnifiedStreamEventType as UnifiedStreamEventPayload,
+	UnifiedStreamEventKind as UnifiedStreamEventKindType,
 	UnifiedResponseBatchResult as UnifiedResponseBatchResultType,
 	UnifiedGenerateResult as UnifiedGenerateResultType,
 	UnifiedResponseStreamingResult as UnifiedResponseStreamingResultType,

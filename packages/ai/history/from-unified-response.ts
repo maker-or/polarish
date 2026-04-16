@@ -231,7 +231,15 @@ export function toolExecutionToMessage(
 
 /**
  * This appends the assistant turn from a unified response and returns a new messages array.
- * Tool results are not included; add those with `toolExecutionToMessage` after you run tools.
+ * It delegates to {@link unifiedResponseToAssistantMessage}: maps `response.content` (text,
+ * reasoning, tool-call parts), fills text from `response.text` when needed, merges orphan
+ * `response.toolCalls`, and sets usage / stopReason / provider. Tool results are not included;
+ * after you run tools, append with {@link toolExecutionToMessage} before the next `generate`.
+ *
+ * @param messages - Prior conversation turns for the next agent step.
+ * @param response - Final `UnifiedResponse` from batch `generate` or `final()` / `done` when streaming.
+ * @param options - Optional `provider` if `response.providerMetadata.provider` is missing, optional
+ *   `usage` when the run omitted usage, optional `timestamp` for the assistant message.
  */
 export function appendAssistantFromUnifiedResponse(
 	messages: ReadonlyArray<message>,

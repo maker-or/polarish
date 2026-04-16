@@ -63,17 +63,20 @@ const CommandBox = ({ command }: { command: string }) => {
  * @param number - Step number
  * @param title - Step title/description
  * @param command - Optional command to display
+ * @param code - Optional code block to display
  * @param link - Optional link with text and href
  */
 const Step = ({
 	number,
 	title,
 	command,
+	code,
 	link,
 }: {
 	number: number;
 	title: string;
 	command?: string;
+	code?: string;
 	link?: { text: string; href: string };
 }) => {
 	return (
@@ -98,6 +101,11 @@ const Step = ({
 						)}
 					</p>
 					{command && <CommandBox command={command} />}
+					{code && (
+						<pre className="mt-3 whitespace-pre-wrap rounded border border-[#403149] bg-[#1a1620] p-4 text-[14px] leading-relaxed text-[#d4b4e2] overflow-x-auto">
+							{code}
+						</pre>
+					)}
 				</div>
 			</div>
 		</div>
@@ -125,14 +133,14 @@ const ABOUT_CONTENT = {
  * Contains onboarding steps and example response data for developers
  */
 const USAGE_CONTENT_DEV = {
-	title: "use Polaris",
+	title: "use polarish",
 	paragraphs: [
 		"If you are a developer and want to leverage what we are building so that your users can bring their own subscription follow these instructions.",
 	],
 	steps: [
 		{
 			number: 1,
-			title: "First register your application here to use the Polaris OAuth",
+			title: "First register your application here to use the polarish OAuth",
 		},
 		{
 			number: 2,
@@ -141,34 +149,46 @@ const USAGE_CONTENT_DEV = {
 		{
 			number: 3,
 			title: "Add this button to the login page",
-			command: "continue with Polaris",
+			command: "continue with polarish",
 		},
 		{
 			number: 4,
 			title:
 				"When a user is successfully authenticated, they will be redirected to your provided redirect URI along with the following information",
 		},
+		{
+			number: 5,
+			title: "Now we will look how can u send the request to the LLM",
+			code: `import {create} from "polarsih/ai"
+
+const polarsih = create({
+    accessToken: process.env.MACHINE_ACCESS_TOKEN ?? "",
+    refreshToken: process.env.MACHINE_REFRESH_TOKEN ?? "",
+    clientId: process.env.MACHINE_CLIENT_ID ?? "",
+    clientSecret: process.env.MACHINE_CLIENT_SECRET ?? "",
+})`,
+		},
 	],
-	response: `{
-  "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzb19vaWRjX2tleV9wYWlyXzAxSlBYTjZLRjdOQUVBWlRGRFlFU0FFMEtYIn0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyXzAxSlBYTjZLQTc2MjJLSjRWUDgzWDFOVEtYIiwic2lkIjoiYXBwX2NvbnNlbnRfMDFKUFhONktBUVc4M0FNWFhZNVdYM1JIVEoiLCJqdGkiOiIwMUpQWE42S0ZHWlFZVzNBTTJERVZYODRZUyIsImV4cCI6MTc0MjYwNDg1MywiaWF0IjoxNzQyNjA0NTUzfQ.dsMI3PBp5LWGeUosFUYYLsjC78swFMI4EUVXW1LN7yd80hxLhAvCX6gKN2s9h13a1tkAX77PDI2PooEJ8RQyB-Zcp_wzdomHffjqCeL-YgGojuCUmgjOm9w7kwg86e81tcMBIX3y872pe9jg1HrVs0t_tJNjoLEKtSwm-Flegttyg7M5SikrHKzul0Jv6ovaXjN4RygDPH6Nbg7Ewag5UwYd9aQK7IRG2oXZPC6WjJx-boyRvwgAqJ5pCedRc2ta5-sb3KyrgS6Xb0S3y1KA57RiDvJdQp8z_wL2_4e6iwG00a7OwyorIDpxKl5kAJE_Fct71931lB4EmNsGkVLxoA",
-  "expires_in": 3600,
-  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzb19vaWRjX2tleV9wYWlyXzAxSlBYTjZLRjdOQUVBWlRGRFlFU0FFMEtYIn0.eyJuYW1lIjoiTGVyb3kgSmVua2lucyIsImdpdmVuX25hbWUiOiJMZXJveSIsImZhbWlseV9uYW1lIjoiSmVua2lucyIsImVtYWlsIjoibGVyb3kuamVua2luc0BleGFtcGxlLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwiZXhwIjoxNzQyNjA4MTUzLCJpYXQiOjE3NDI2MDQ1NTN9.UmZj238IIPPtjlc3xEUn_nkNPtw4d71pJLcVyN-0IhDwS1q4bLURIfaV5NdBOUCMmK-BKK5p9NtRUVx5iuTuokah1tQAvfY6dMYNBAD9LMpsv4dvFZMSJHbH9khgrpnLUdvPzTveNBHpmBK7WvZ5VGLlX3Mr-WuI28bvHPI112sNaa-A8gPU7joMgitq01d0raWkBf6XvcAODHD8qKdcS0p4xCnFHVZnfKtgpVDnQJXEFzZnCbcHhdJvaWaTbhLWuWlbIbi4bv-Za3aYAZ-SdcvqkQNWcAPnaj17qLEfY_nyjmiVSW6qkWuq_vJUBLFMmaMbJTYzAsUPAh17_cg24A",
-  "refresh_token": "GCOzb87tq7LWpSMaBCjVHnJPH",
-  "token_type": "bearer"
-}`,
+	response: {
+		access_token: "eyJhbGc.....",
+		expires_in: 3600,
+		id_token: "eyJh........",
+		refresh_token: "GCO......",
+		token_type: "bearer",
+	},
 };
 
 /**
  * Usage page content configuration - User view
- * Contains steps with commands for users to get started with Polaris
+ * Contains steps with commands for users to get started with polarish
  */
 const USAGE_CONTENT_USER = {
-	title: "use Polaris",
+	title: "use polarish",
 	type: "steps",
 	steps: [
 		{
 			number: 1,
-			title: "First create your Polaris account",
+			title: "First create your polarish account",
 			link: { text: "here", href: "#" },
 		},
 		{
@@ -184,7 +204,7 @@ const USAGE_CONTENT_USER = {
 		{
 			number: 4,
 			title:
-				"Now you can use your AI subscriptions in any tool support login with your Polaris account",
+				"Now you can use your AI subscriptions in any tool support login with your polarish account",
 		},
 	],
 };
@@ -193,6 +213,7 @@ type UsageStep = {
 	number: number;
 	title: string;
 	command?: string;
+	code?: string;
 	link?: { text: string; href: string };
 };
 
@@ -350,7 +371,7 @@ export default function Home() {
 
 								<div>
 									<pre className="whitespace-pre-wrap rounded border border-[#403149] bg-[#1a1620] p-4 text-[14px] leading-relaxed text-[#d4b4e2] overflow-x-auto">
-										{USAGE_CONTENT_DEV.response}
+										{JSON.stringify(USAGE_CONTENT_DEV.response, null, 2)}
 									</pre>
 								</div>
 							</div>

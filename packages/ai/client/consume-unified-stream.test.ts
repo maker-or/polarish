@@ -177,7 +177,7 @@ describe("consumeUnifiedStream", () => {
 				`data: ${JSON.stringify({
 					type: "done",
 					reason: "stop",
-					message: finalResponse,
+					response: finalResponse,
 				})}`,
 				"",
 			].join("\n"),

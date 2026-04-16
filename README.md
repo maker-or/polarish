@@ -31,3 +31,4 @@ bun run typecheck
 bun run web:dev
 bun run desktop:dev
 ```
+

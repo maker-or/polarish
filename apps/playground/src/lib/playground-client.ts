@@ -151,7 +151,7 @@ export async function runPlaygroundRequest(
 		const doneEvent = {
 			type: "done",
 			reason: "stop",
-			message: result.response,
+			response: result.response,
 		} as Extract<UnifiedStreamEventPayload, { type: "done" }>;
 		handlers.onDone?.(doneEvent);
 		emitTrace("run.done", "batch response returned");
@@ -213,9 +213,9 @@ export async function runPlaygroundRequest(
 				break;
 			case "done":
 				handlers.onDone?.(event);
-				emitSessionTokens(event.message.sessionTokens ?? latestSessionTokens);
+				emitSessionTokens(event.response.sessionTokens ?? latestSessionTokens);
 				emitTrace("run.done", "stream done event received");
-				return event.message;
+				return event.response;
 			case "error":
 				handlers.onError?.(event);
 				emitTrace("run.error", "stream error event received");

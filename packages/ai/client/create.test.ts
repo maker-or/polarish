@@ -206,7 +206,7 @@ describe("create", () => {
 					`data: ${JSON.stringify({
 						type: "done",
 						reason: "stop",
-						message: {
+						response: {
 							...finalResponse,
 							sessionTokens: {
 								accessToken: "stream-rotated-token",
@@ -269,7 +269,7 @@ describe("create", () => {
 	test("falls back to the default base url when baseUrl is omitted", async () => {
 		globalThis.fetch = (async (input) => {
 			expect(input).toBe(
-				"https://your-default-polaris-url/api/v1/chat/completions",
+				"https://your-default-polarish-url/api/v1/chat/completions",
 			);
 			return Response.json(finalResponse);
 		}) as typeof globalThis.fetch;

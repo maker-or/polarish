@@ -329,7 +329,7 @@ export function codexUnifiedStreamEvents(input: {
 			out.push({
 				type: "done",
 				reason: unifiedStreamDoneReason(next.finishReason),
-				message: toUnifiedSnapshot(next),
+				response: toUnifiedSnapshot(next),
 			});
 			break;
 		}
