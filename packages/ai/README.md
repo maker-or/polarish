@@ -1,76 +1,58 @@
 # @polarish/ai
 
-TypeScript SDK for a **unified chat API**: one request shape (`appRequestShape`), one final payload (`UnifiedResponse`), and Server-Sent Events (`UnifiedStreamEvent`) with pi-mono-style `for await` over `events`.
-
----
+## Polarish is typeScript SDK which provides a unified layers designed to help you build AI-powered applications and agentic workflows which work in the tandam with the polarish-cli
 
 ## Table of contents
 
-1. [Who this is for](#who-this-is-for)
-2. [Installation & dependencies](#installation--dependencies)
-3. [Create a client](#create-a-client)
-4. [Send a request](#send-a-request)
+1. [Installation](#installation)
+2. [Quick start](#quick-start)
+3. [generate() — single request](#generate--single-request)
+4. [run() — agent loop](#run--agent-loop)
 5. [Request shape (`appRequestShape`)](#request-shape-apprequestshape)
 6. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
 7. [Defining tools](#defining-tools)
-8. [Tools and agent loops](#tools-and-agent-loops)
+8. [Manual tool loops with generate()](#manual-tool-loops-with-generate)
 9. [Backend & testing exports](#backend--testing-exports)
 10. [Errors & runtime](#errors--runtime)
 11. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
-12. [Non-streaming vs streaming results](#non-streaming-vs-streaming-results)
-13. [UnifiedResponse](#unifiedresponse)
-14. [TypeScript: stream events](#typescript-stream-events)
-15. [Streaming events reference](#streaming-events-reference)
+12. [UnifiedResponse](#unifiedresponse)
+13. [generate() streaming events](#generate-streaming-events)
+14. [run() streaming events](#run-streaming-events)
 
 ---
 
-## Who this is for
-
-
-| You are…                                                                  | Start here                                                                                                                                                                                    |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Building an app** that talks to your local bridge                      | `[create()](#create-a-client)` → `client.generate()`, `[appRequestShape](#request-shape-apprequestshape)`, [tools & loops](#tools-and-agent-loops), [streaming](#streaming-events-reference). |
-| **Implementing or adapting the bridge transport**                        | `[generate()](#send-a-request)` (low-level), `[compileRequest](#backend--testing-exports)`, Codex bridge helpers in [Backend & testing exports](#backend--testing-exports).                   |
-
-
-The generic `requestShape` in `types.ts` documents the broader message/history union. `**generate` and `client.generate` only accept `appRequestShape`** today (`provider: "openai-codex"` + `model` from the Codex model list).
-
----
-
-## Installation & dependencies
+## Installation
 
 ```bash
 bun add @polarish/ai
 ```
 
-**Peer:** `typescript` ^5. `**zod`** is optional at runtime (listed as a peer with `optional: true`); use it for tool schemas, or JSON Schema / Effect / shorthand as in [Defining tools](#defining-tools).
-
-**Runtime:** a global `**fetch`** implementation is required (`generate` throws if `fetch` is missing).
-
 ---
 
-## Create a client
+## Quick start
 
-`create(options)` returns a `Client` with a single method: `generate(request)` where `request` matches `appRequestShape`.
+`create(options)` returns a `Client` with two methods:
 
-- **Endpoint:** `POST` `{baseUrl}/v1/generate` (trailing slash on `baseUrl` is optional).
-- **Default base URL:** `http://127.0.0.1:4318` for the local bridge.
-- **Streaming:** keep using the same request shape and set `stream: true`; the bridge responds with SSE.
+| Method | What it does |
+| --- | --- |
+| `generate(request)` | Single HTTP request → one `UnifiedResponse`. You own the loop. |
+| `run(request, options?)` | Full agent loop — tool execution, history, and re-calling `generate()` handled automatically. |
 
 ```ts
 import { create } from "@polarish/ai";
 
 const client = create({
-  /** Origin of your local bridge (trailing slash optional). */
-  baseUrl: "http://127.0.0.1:4318",
+  baseUrl: "http://127.0.0.1:4318", // default — local bridge
 });
 ```
 
 ---
 
-## Send a request
+## generate() — single request
 
-### `client.generate` (typical)
+`generate()` sends one `POST` to `{baseUrl}/v1/generate` and returns either a batch result or a streaming handle. It does nothing else — no tool execution, no loop. Use it when the model won't call tools, or when you need full control over the loop yourself.
+
+**Batch (`stream: false`):**
 
 ```ts
 const result = await client.generate({
@@ -82,32 +64,142 @@ const result = await client.generate({
   temperature: 0.8,
   maxRetries: 2,
 });
+
+console.log(result.response.text);
 ```
 
-### `generate` (low-level, same wire contract)
-
-Use this for **tests**, **custom headers**, or **custom bridge transport** outside `create()`:
+**Streaming (`stream: true`):**
 
 ```ts
-import { generate } from "@polarish/ai";
+const result = await client.generate({
+  provider: "openai-codex",
+  model: "gpt-5.4",
+  system: "You are a helpful assistant.",
+  messages: [{ role: "user", content: "Hello." }],
+  stream: true,
+  temperature: 0.8,
+  maxRetries: 2,
+});
 
-const result = await generate(
-  {
-    provider: "openai-codex",
-    model: "gpt-5.4",
-    system: "…",
-    messages: [{ role: "user", content: "Hi." }],
-    stream: false,
-    temperature: 0.8,
-    maxRetries: 2,
-  },
-  {
-    endpoint: "http://127.0.0.1:4318/v1/generate",
-  },
-);
+for await (const event of result.events) {
+  if (event.type === "text_delta") {
+    process.stdout.write(event.delta);
+  }
+}
+
+const final = await result.final(); // full UnifiedResponse
 ```
 
-Batch and stream result shapes match `client.generate`. See [Non-streaming vs streaming results](#non-streaming-vs-streaming-results).
+See [generate() streaming events](#generate-streaming-events) for all event types.
+
+---
+
+## run() — agent loop
+
+`run()` drives the full multi-turn tool execution cycle automatically:
+
+```
+generate() → tool calls? → execute tools locally → append results → generate() again → repeat
+```
+
+It stops when the model finishes without requesting tools, `maxIterations` is reached, or the abort signal fires.
+
+**Every tool that the model may call must have an `execute()` function on its `ToolDefinition`.** Tools without `execute()` return an error result to the model so the loop can continue rather than crash.
+
+### Batch agent loop (`stream: false`)
+
+Waits for the full loop to finish before resolving. Use when you don't need live UI updates:
+
+```ts
+const result = await client.run({
+  provider: "openai-codex",
+  model: "gpt-5.4",
+  system: "Use tools when needed.",
+  messages: [{ role: "user", content: "What is 3 + 4?" }],
+  tools: [sumTool],
+  stream: false,
+  temperature: 0.7,
+  maxRetries: 2,
+}, {
+  maxIterations: 5,
+  onTurn: ({ iteration, toolResults }) => {
+    console.log(`Turn ${iteration}: ${toolResults.length} tool(s) ran`);
+  },
+});
+
+console.log(result.response.text); // final answer
+console.log(result.messages);      // full history — pass to next run() to continue
+console.log(result.iterations);    // how many generate() calls were made
+```
+
+### Streaming agent loop (`stream: true`)
+
+Returns a streaming handle immediately. Every turn streams as it happens — text appears word by word, tool calls show before they execute, tool results appear as they complete:
+
+```ts
+const runner = await client.run({
+  provider: "openai-codex",
+  model: "gpt-5.4",
+  system: "Use tools when needed.",
+  messages: [{ role: "user", content: "List files, grep for config, then summarize." }],
+  tools: [lsTool, grepTool],
+  stream: true,
+  temperature: 0.7,
+  maxRetries: 2,
+}, {
+  maxIterations: 10,
+});
+
+for await (const event of runner.events) {
+  switch (event.type) {
+    case "text_delta":
+      appendToMessageBubble(event.delta);       // stream text into chat
+      break;
+    case "run_tool_executing":
+      showToolCard(event.toolName, event.arguments); // "Running ls…"
+      break;
+    case "run_tool_executed":
+      updateToolCard(event.toolName, event.result, event.isError);
+      break;
+    case "run_turn_start":
+      showThinkingIndicator();
+      break;
+    case "run_complete":
+      console.log(`Done in ${event.iterations} turn(s)`);
+      break;
+  }
+}
+
+const result = await runner.final(); // RunResult: { response, messages, iterations }
+```
+
+See [run() streaming events](#run-streaming-events) for the full event reference.
+
+### run() options
+
+| Option | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `maxIterations` | `number` | `10` | Hard cap on `generate()` calls. Prevents infinite tool loops. |
+| `onTurn` | `(turn: RunTurnEvent) => void` | — | Called after each completed turn. For streaming runs, prefer `run_turn_end` on `events`. |
+| `headers` | `Record<string, string>` | — | Extra HTTP headers forwarded to every `generate()` call. |
+
+### run() result
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `response` | `UnifiedResponse` | The final assistant turn — the one where the model stopped requesting tools. |
+| `messages` | `message[]` | Full conversation history. Starts from `request.messages` and grows each turn. Pass back into the next `run()` to continue. |
+| `iterations` | `number` | Total `generate()` HTTP calls made. |
+
+### generate() vs run() — when to use which
+
+| Situation | Use |
+| --- | --- |
+| Simple Q&A, no tools | `generate()` |
+| Single-turn tool call, want full control | `generate()` + manual loop |
+| Multi-turn agent that calls tools | `run()` |
+| Need live UI updates (text streaming, tool cards) | `run({ stream: true })` |
+| Background job, no UI | `run({ stream: false })` |
 
 ---
 
@@ -116,56 +208,290 @@ Batch and stream result shapes match `client.generate`. See [Non-streaming vs st
 Codex-backed unified API:
 
 
-| Field         | Type               | Notes                                                                        |
-| ------------- | ------------------ | ---------------------------------------------------------------------------- |
-| `provider`    | `"openai-codex"`   | Required today                                                               |
-| `model`       | `CodexModelId`     | e.g. `gpt-5.4` — import `CodexModelId` from `@polarish/ai/openai-codex`      |
-| `system`      | `string`           | System / developer instructions                                              |
-| `messages`    | `message[]`        | User, assistant, tool turns — [Messages](#messages-attachments-and-tool-ids) |
-| `tools`       | `ToolDefinition[]` | Optional — [Defining tools](#defining-tools)                                 |
-| `stream`      | `boolean`          | `false` → JSON body; `true` → SSE unified stream                             |
-| `temperature` | `number`           | Sampling                                                                     |
-| `maxRetries`  | `number`           | SDK / transport retry hint                                                   |
-| `signal`      | `AbortSignal?`     | Abort HTTP                                                                   |
+| Field         | Type               | Notes                                                                                                            |
+| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `provider`    | `"openai-codex"`   | codex is the only provider supported right now we are working to intergate others like claude , gemini , copilot |
+| `model`       | `CodexModelId`     | e.g. `gpt-5.4` — import `CodexModelId` from `@polarish/ai/openai-codex`                                          |
+| `system`      | `string`           | System / developer instructions                                                                                  |
+| `messages`    | `message[]`        | User, assistant, tool turns — [Messages](#messages-attachments-and-tool-ids)                                     |
+| `tools`       | `ToolDefinition[]` | Optional — [Defining tools](#defining-tools)                                                                     |
+| `stream`      | `boolean`          | `false` → JSON body; `true` → SSE unified stream                                                                 |
+| `temperature` | `number`           | Sampling                                                                                                         |
+| `maxRetries`  | `number`           | SDK / transport retry hint                                                                                       |
+| `signal`      | `AbortSignal?`     | Abort HTTP                                                                                                       |
 
 
 ---
 
 ## Messages, attachments, and tool IDs
 
-### Message roles
+The `messages` array is the conversation history you send on every request. Each item is one of three roles: `user`, `assistant`, or `tool`. The SDK calls this union `message`.
 
-`message` is a union:
+---
 
-- `**{ role: "user", content, timestamp? }**` — `content` is a string or an array of blocks (`TextContent`, `AttachmentContent`, …).
-- `**{ role: "assistant", … }**` — assistant turn for history: text, optional thinking (`ThinkingContent`), and `**toolcall**` items (`Toolcall`).
-- `**{ role: "tool", toolCallId, toolName, content, isError, … }**` — after you run a tool locally (`execute`), one row per tool result.
+### User messages
 
-For the next request, append assistant output and tool results **in order**.
+The simplest user message is a plain string:
 
-### Attachments (multimodal user input)
+```ts
+{
+ role: "user"
+ content: "What is the capital of India?" 
+}
+```
 
-User content may include `AttachmentContent`: `kind` (`image` | `audio` | `video` | `document`), `mimetype`, optional `filename`, and `source` — `{ type: "base64", data }`, `{ type: "url", url }`, or `{ type: "file_id", fileId }`.
+But `content` can also be an **array of content blocks** — this is how you send text alongside files, images, or other attachments in the same message:
 
-Which models accept attachments is reflected in the `**openaiCodex`** catalog (see [Backend & testing exports](#backend--testing-exports)): each model lists `input: ["text"]` and/or `"attachment"`. For example, `gpt-5.3-codex-spark` is text-only in that registry.
+```ts
+{
+  role: "user",
+  content: [
+    { 
+      type: "text",
+      text: "What is in this image?"
+    },
+    {
+      type: "attachment",
+      kind: "image",
+      mimetype: "image/png",
+      filename: "screenshot.png",   // optional
+      source: { type: "base64", data: "<base64-encoded-bytes>" },
+    },
+  ],
+}
+```
 
-### Tool call IDs (OpenAI-style)
+The `timestamp` field is optional on all roles. Set it when you need stable ordering in stored history.
 
-On a tool-call part, `**id`** is the provider output item id (e.g. `fc_…`); `**callId**` (when present) is the correlation id (e.g. `call_…`) that pairs with tool results. When building a tool result message, use:
+---
 
-`toolCallId: call.callId ?? call.id`
+### Attachments explained
 
-so history matches what the provider expects.
+An `AttachmentContent` block has four fields:
 
-### Tool result text
 
-`toolExecutionToMessage` stringifies non-string `result` values with `JSON.stringify` for the `role: "tool"` text block.
+| Field      | Type                                       | Notes                                        |
+| ---------- | ------------------------------------------ | -------------------------------------------- |
+| `type`     | `"attachment"`                             | Always `"attachment"` — identifies the block |
+| `kind`     | `"image" | "audio" | "video" | "document"` | What kind of file this is                    |
+| `mimetype` | `string`                                   | e.g. `"image/png"`, `"application/pdf"`      |
+| `filename` | `string` *(optional)*                      | Hint to the model; not required              |
+| `source`   | One of three shapes (see below)            | Where the bytes come from                    |
+
+
+#### Three ways to supply the file
+
+**1. Base64 — inline bytes**
+
+Use when you already have the file in memory (e.g. user uploads a file in the browser):
+
+```ts
+source: {
+  type: "base64",
+  data: "<base64-encoded-string>",
+}
+```
+
+**2. URL — remote file**
+
+Use when the file is publicly accessible (or behind a signed URL):
+
+```ts
+source: {
+  type: "url",
+  url: "https://example.com/report.pdf",
+}
+```
+
+**3. File ID — already uploaded to the provider**
+
+Use when you uploaded the file in a previous call and received a provider file id back:
+
+```ts
+source: {
+  type: "file_id",
+  fileId: "file-abc123",
+}
+```
+
+#### Full examples
+
+Image from base64:
+
+```ts
+{
+  type: "attachment",
+  kind: "image",
+  mimetype: "image/jpeg",
+  filename: "photo.jpg",
+  source: { type: "base64", data: "/9j/4AAQSkZJRgAB..." },
+}
+```
+
+PDF document from URL:
+
+```ts
+{
+  type: "attachment",
+  kind: "document",
+  mimetype: "application/pdf",
+  filename: "contract.pdf",
+  source: { type: "url", url: "https://cdn.example.com/contract.pdf" },
+}
+```
+
+#### Which models accept attachments?
+
+Not every model supports attachments. Each model in the `openaiCodex` catalog declares its accepted input types:
+
+```ts
+import { openaiCodex } from "@polarish/ai";
+
+// "gpt-5.4" → input: ["text", "attachment"]  ✓ multimodal
+// "gpt-5.3-codex-spark" → input: ["text"]     ✗ text only
+console.log(openaiCodex["gpt-5.4"].input);
+```
+
+If you send an attachment to a text-only model, the bridge will reject or drop it. Check `model.input` before adding attachment blocks. See [Backend & testing exports](#backend--testing-exports) for the full catalog.
+
+---
+
+### Assistant messages
+
+Assistant turns in history may contain text, optional reasoning (`thinking`), and tool calls. You normally build these with `appendAssistantFromUnifiedResponse` instead of writing them by hand:
+
+```ts
+// Text only
+{
+  role: "assistant",
+  content: [
+    { type: "text", 
+      text: "I'll help with that." 
+    },
+  ],
+  usage: { ... },
+  provider: "openai-codex",
+  stopReason: "stop",
+}
+```
+
+
+
+When the model also thinks and calls a tool:
+
+```ts
+{
+  role: "assistant",
+  content: [
+    { type: "thinking",
+      thinking: "The user wants me to search for something..."
+    },
+
+    { type: "text", 
+      text: "Let me look that up."
+    },
+
+    {
+      type: "toolcall",
+      id: "fc_abc123",       // provider output item id
+      callId: "call_xyz789", // correlation id — use this in toolExecutionToMessage
+      name: "searchDocs",
+      arguments: { q: "tool ids" },
+    },
+  ],
+  usage: { ... },
+  provider: "openai-codex",
+  stopReason: "toolUse",
+}
+```
+
+---
+
+### Tool result messages
+
+After you run a tool locally, you append one `role: "tool"` message per tool call before the next `generate`:
+
+```ts
+{
+  role: "tool",
+  toolCallId: "call_xyz789",  // must match callId (or id) from the assistant toolcall block
+  toolName: "searchDocs",
+  content: [{ type: "text", text: "Found 3 relevant docs." }],
+  isError: false,
+}
+```
+
+Use `toolExecutionToMessage` to build this — it handles stringifying non-string results automatically:
+
+```ts
+import { toolExecutionToMessage } from "@polarish/ai";
+
+messages.push(
+  toolExecutionToMessage({
+    toolCallId: call.callId ?? call.id,
+    toolName: call.name,
+    result: { docs: ["doc1", "doc2", "doc3"] }, // objects get JSON.stringify'd
+    isError: false,
+  }),
+);
+```
+
+Tool result `content` can also include attachments — for example, if your tool returns an image:
+
+```ts
+{
+  role: "tool",
+  toolCallId: "call_xyz789",
+  toolName: "generateChart",
+  content: [
+    { type: "text", text: "Here is the chart." },
+    {
+      type: "attachment",
+      kind: "image",
+      mimetype: "image/png",
+      source: { type: "base64", data: "<chart-png-bytes>" },
+    },
+  ],
+  isError: false,
+}
+```
+
+**Append order matters.** For each agent step:
+
+```
+assistant turn  →  tool result(s)  →  next generate()
+```
+
+---
+
+### Tool call IDs
+
+When the model calls a tool, it produces two IDs:
+
+
+| ID       | Example       | What it is                                                      |
+| -------- | ------------- | --------------------------------------------------------------- |
+| `id`     | `fc_abc123`   | The output item ID assigned by the provider to this tool call   |
+| `callId` | `call_xyz789` | The correlation ID the provider expects back on the tool result |
+
+
+Always use `call.callId ?? call.id` when building tool result messages — `callId` is what the provider uses to match results back to the correct tool call:
+
+```ts
+toolExecutionToMessage({
+  toolCallId: call.callId ?? call.id,  // ← correct
+  toolName: call.name,
+  result: output,
+})
+```
+
+If you use `call.id` when `callId` is present, the provider may not match the result and the agent loop will break.
 
 ---
 
 ## Defining tools
 
-Put `ToolDefinition` values on `tools`. For agent loops you typically provide `**name**`, `**description**`, `**inputSchema**`, and `**execute**`. The hosted model does not run `execute`—your loop does after `tool-call` parts in `UnifiedResponse` (and after any approval flow).
+Put `ToolDefinition` values on `tools`. For agent loops you typically provide `name`**,** `description`, `inputSchema`, and `execute`. The hosted model does not run `execute`—your loop does after `tool-call` parts in `UnifiedResponse` (and after any approval flow).
 
 
 | Field              | Purpose                                                                                                                                                               |
@@ -296,33 +622,74 @@ More: [Tools and agent loops](#tools-and-agent-loops), [Streaming events referen
 
 ---
 
-## Tools and agent loops
+## Manual tool loops with generate()
 
-1. Send `ToolDefinition[]` with `name`, `description`, `inputSchema`, `execute`, and optional `requiresApproval`, `rejectionMode`, `outputSchema`, `retrySafe`, `metadata`.
-2. Read `UnifiedResponse`: `content` and `toolCalls` for `tool-call` parts (ids — e.g. OpenAI `fc_…` / `call_…`).
-3. `execute` with parsed args → `toolExecutionToMessage` (or a hand-built tool message).
-4. `unifiedResponseToAssistantMessage` or `appendAssistantFromUnifiedResponse` + tool message(s) → `messages` → `generate` again.
+If you need full control over each turn — custom retry logic, approval gates, or side effects between turns — manage the loop yourself using `generate()` directly.
 
-`requiresApproval: true` → `approval_required` may appear before `execute` — [Handling approval_required](#handling-approval_required).
+> **Prefer `client.run()`** for standard agent loops — it handles everything below automatically.
 
-**History helpers** (`@polarish/ai`):
+The steps for one turn:
 
+```
+generate() → check toolCalls → execute each → appendAssistantFromUnifiedResponse → toolExecutionToMessage → generate() again
+```
 
-| Export                               | Does                                           |
-| ------------------------------------ | ---------------------------------------------- |
-| `unifiedResponseToAssistantMessage`  | `UnifiedResponse` → assistant `message`        |
-| `appendAssistantFromUnifiedResponse` | Append assistant to `messages`                 |
-| `toolExecutionToMessage`             | Build `role: "tool"` after `execute`           |
-| `normalizeToolArgumentsForHistory`   | Normalize args for assistant `toolcall` blocks |
-| `finishReasonToStopReason`           | Map finish reason → assistant `stopReason`     |
-| `emptyUsage`                         | Zero `Usage` when the response omitted usage   |
+```ts
+import {
+  appendAssistantFromUnifiedResponse,
+  toolExecutionToMessage,
+} from "@polarish/ai";
 
+let messages = [{ role: "user" as const, content: "What is 3 + 4?" }];
+
+// Step 1: call generate
+const first = await client.generate({
+  provider: "openai-codex",
+  model: "gpt-5.4",
+  system: "Use the sum tool.",
+  messages,
+  tools: [sumTool],
+  stream: false,
+  temperature: 0.7,
+  maxRetries: 2,
+});
+
+// Step 2: append the assistant turn to history
+messages = appendAssistantFromUnifiedResponse(messages, first.response);
+
+// Step 3: execute each tool and append results
+for (const call of first.response.toolCalls) {
+  const output = await sumTool.execute(call.arguments);
+  messages.push(
+    toolExecutionToMessage({
+      toolCallId: call.callId ?? call.id,
+      toolName: call.name,
+      result: output,
+    }),
+  );
+}
+
+// Step 4: call generate again with the full history
+// messages is now: [userMsg, assistantMsg, toolResultMsg]
+const second = await client.generate({ ..., messages });
+```
+
+**History helpers:**
+
+| Export | Does |
+| --- | --- |
+| `appendAssistantFromUnifiedResponse` | Append completed assistant turn to `messages` |
+| `unifiedResponseToAssistantMessage` | Convert `UnifiedResponse` → assistant `message` (no append) |
+| `toolExecutionToMessage` | Build `role: "tool"` message after `execute()` |
+| `normalizeToolArgumentsForHistory` | Normalize tool args to `Record<string, unknown>` |
+| `finishReasonToStopReason` | Map `ResponseFinishReason` → `stopReason` |
+| `emptyUsage` | Zero `Usage` when the run omitted token counts |
 
 ---
 
 ## Backend & testing exports
 
-Useful when **implementing** the local bridge transport, **adapting** Codex streaming, or building **model pickers** in the UI:
+Useful when **adapting** Codex streaming in tests or tools, or building **model pickers** in the UI. The runnable bridge HTTP server lives in the `**@polarish/cli`** package source (`src/bridge/`); these exports help you mirror the same request/response mapping in code or tests.
 
 
 | Export                                                                                 | Role                                                                                                                     |
@@ -396,39 +763,6 @@ Useful when **implementing** the local bridge transport, **adapting** Codex stre
 
 ---
 
-## Non-streaming vs streaming results
-
-`stream: false` → `UnifiedResponseBatchResult` — `result.stream === false` — use `result.response`.
-
-`stream: true` → `UnifiedResponseStreamingResult`:
-
-- `events` — `AsyncIterable<UnifiedStreamEventType>` (`start`, `text_delta`, `toolcall_end`, `done`, …). Narrow on `event.type` in TypeScript for safe field access.
-- `textStream` — `ReadableStream<string>` (assistant text deltas only; driven by unified events).
-- `final()` — `Promise<UnifiedResponse>` (same shape as batch `response`).
-
-```ts
-const result = await client.generate({ /* … */, stream: false });
-if (!result.stream) {
-  const text = result.response.text;
-  const parts = result.response.content;
-}
-```
-
-```ts
-const result = await client.generate({ /* … */, stream: true });
-if (result.stream) {
-  for await (const event of result.events) {
-    if (event.type === "text_delta") {
-      process.stdout.write(event.delta);
-    }
-  }
-  const final = await result.final();
-}
-```
-
-Wire format: **SSE**. The `event:` line matches the payload `type`; see [Streaming events reference](#streaming-events-reference).
-
----
 
 ## UnifiedResponse
 
@@ -450,16 +784,11 @@ Normalized final payload for batch and stream:
 
 ---
 
-## TypeScript: stream events
+## generate() streaming events
 
-- `**UnifiedStreamEventType`** — discriminated union; switch on `event.type` for autocomplete-friendly handling.
-- `**UNIFIED_STREAM_EVENT_TYPE_VALUES`** — `const` array of every event `type` string; use for exhaustive checks or tests (`as const satisfies` keeps it aligned with the union in the package).
+`generate({ stream: true })` returns `events: AsyncIterable<UnifiedStreamEventType>` — raw provider events for a single turn. Switch on `event.type` in TypeScript for full autocomplete and type narrowing. The SSE `event:` line matches the `type` field.
 
----
-
-## Streaming events reference
-
-`stream: true` → response body is SSE. Prefer JSON `data` where the parsed object includes `type` (`UnifiedStreamEventType`). The `event:` line matches `type`.
+`UNIFIED_STREAM_EVENT_TYPE_VALUES` is a `const` array of every event `type` string — use it for exhaustive checks or tests.
 
 ### Shared fields on many events
 
@@ -565,13 +894,108 @@ Success end. **No `partial`** — `response` only.
 
 Fail or abort. **No `partial`** — `error` only.
 
-
 | Property | Type                     | Notes                                       |
 | -------- | ------------------------ | ------------------------------------------- |
 | `type`   | `"error"`                |                                             |
 | `reason` | `"error"` or `"aborted"` | Hard error vs cancel                        |
 | `error`  | `UnifiedResponse`        | Error payload (`status`, `errorMessage`, …) |
 
+---
+
+## run() streaming events
+
+`run({ stream: true })` returns `events: AsyncIterable<RunStreamEvent>`.
+
+`RunStreamEvent` is a **superset** of `UnifiedStreamEventType` — every event from `generate()` is forwarded as-is from each turn, plus five run-loop lifecycle events injected between turns:
+
+```ts
+type RunStreamEvent =
+  | UnifiedStreamEventType   // all generate() events, forwarded from each turn
+  | RunTurnStartEvent        // "run_turn_start"
+  | RunToolExecutingEvent    // "run_tool_executing"
+  | RunToolExecutedEvent     // "run_tool_executed"
+  | RunTurnEndEvent          // "run_turn_end"
+  | RunCompleteEvent         // "run_complete"
+```
+
+### Event flow for a two-turn agent run
+
+```
+run_turn_start       iteration: 0
+  start              ← forwarded from generate()
+  toolcall_start     ← model begins a tool call
+  toolcall_delta     ← arguments streaming in
+  toolcall_end       ← tool call complete
+  done               ← reason: "toolUse"
+run_tool_executing   ← execute() is about to run locally
+run_tool_executed    ← execute() returned, result ready
+run_turn_end         iteration: 0, toolResults: [...]
+
+run_turn_start       iteration: 1
+  start
+  text_start
+  text_delta         ← final answer streaming in
+  text_end
+  done               ← reason: "stop"
+run_turn_end         iteration: 1, toolResults: []
+run_complete         ← full loop finished
+```
+
+### `run_turn_start`
+
+Fires at the beginning of each `generate()` call in the loop. Use it to show a thinking indicator.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `type` | `"run_turn_start"` | |
+| `iteration` | `number` | Zero-based turn index |
+
+### `run_tool_executing`
+
+Fires just before a tool's `execute()` is called locally. Use it to show "Running grep…" before the result is ready.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `type` | `"run_tool_executing"` | |
+| `iteration` | `number` | Turn index |
+| `toolName` | `string` | Name of the tool |
+| `toolCallId` | `string` | `callId ?? id` from the model's tool call |
+| `arguments` | `unknown` | Decoded arguments the model passed |
+
+### `run_tool_executed`
+
+Fires after `execute()` completes or throws. Use it to display the result or error inline.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `type` | `"run_tool_executed"` | |
+| `iteration` | `number` | Turn index |
+| `toolName` | `string` | |
+| `toolCallId` | `string` | |
+| `result` | `unknown` | Return value from `execute()`, or an error message string |
+| `isError` | `boolean` | `true` if `execute()` threw or tool had no `execute` function |
+
+### `run_turn_end`
+
+Fires after all tools for a turn have been executed and results appended to history.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `type` | `"run_turn_end"` | |
+| `iteration` | `number` | Turn index |
+| `response` | `UnifiedResponse` | Completed assistant response for this turn |
+| `toolResults` | `ToolResultMessage[]` | Tool results executed this turn. Empty on the final stop turn. |
+
+### `run_complete`
+
+Fires once when the entire loop finishes. Carries the same data as `RunResult`.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `type` | `"run_complete"` | |
+| `response` | `UnifiedResponse` | Final assistant response |
+| `messages` | `message[]` | Full conversation history |
+| `iterations` | `number` | Total `generate()` calls made |
 
 ---
 

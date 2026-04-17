@@ -1,34 +1,19 @@
-# Hax Monorepo
+# Polarish
 
-This repository is now a Turborepo workspace for the Hax platform.
+If you are building anything with AI and you want your users to bring their existing AI subscriptions , instead of you maintaining the infernce cost , then you are in the right place , we have build polarish for exactly same purpouse , so that user can bring in their existing ai subs and you can foucs more on building your product instead of worring about the infernce cost
 
-## Apps
+# How to use
 
-- `apps/desktop` - Electron + Vite desktop connector
-- `apps/web` - Next.js web console scaffold
-
-## Shared
-
-- `convex/` - shared Convex project
-- `packages/config` - shared TypeScript config
-- `packages/shared` - shared package placeholder
-
-## Tooling
-
-- `bun` workspaces
-- `turbo` for task orchestration
-- `biome` for formatting and linting
-- `tailwindcss` in web and desktop
-- `shadcn/ui` scaffold files in web and desktop
-
-## Commands
+First ask your users to download the polarish cli tool  and run the commnad
 
 ```bash
-bun run dev
-bun run build
-bun run lint
-bun run typecheck
-bun run web:dev
-bun run desktop:dev
+bun add -g @polarish/cli
 ```
 
+```bash
+polarish origins add https://app.example.com
+```
+
+that's it , Now as a devloper use the polarish ai package
+
+polarish is heavily inspired from t3code and pimono ❤️‍🔥

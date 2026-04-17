@@ -119,7 +119,24 @@ export { createUnifiedResponseStream } from "./runtime/unified-response-stream.t
 export { unifiedResponseForStreamError } from "./runtime/unified-response-error.ts";
 export { create } from "./client/create.ts";
 export { generate } from "./client/generate.ts";
-export type { Client, Client as ClientType } from "./client/create.ts";
+export { run } from "./client/run.ts";
+export type {
+	Client,
+	Client as ClientType,
+	ClientRunOptions,
+} from "./client/create.ts";
+export type {
+	RunOptions,
+	RunResult,
+	RunTurnEvent,
+	RunStreamingResult,
+	RunStreamEvent,
+	RunTurnStartEvent,
+	RunToolExecutingEvent,
+	RunToolExecutedEvent,
+	RunTurnEndEvent,
+	RunCompleteEvent,
+} from "./client/run.ts";
 export {
 	appendAssistantFromUnifiedResponse,
 	emptyUsage,

@@ -3,10 +3,7 @@
 	"compilerOptions": {
 		"lib": ["ES2023", "DOM"],
 		"noEmit": true,
-		"baseUrl": ".",
-		"paths": {
-			"@polarish/bridge": ["../bridge/dist/index.d.ts"]
-		}
+		"baseUrl": "."
 	},
 	"include": ["src/**/*.ts", "bin/**/*.ts"]
 }

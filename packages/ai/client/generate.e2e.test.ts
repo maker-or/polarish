@@ -25,7 +25,7 @@ const executeCodexMock = mock(
 	}),
 );
 
-mock.module("../../../packages/bridge/src/codex.ts", () => ({
+mock.module("../../../packages/hax-cli/src/bridge/codex.ts", () => ({
 	checkCodexAvailability: async () => ({
 		authenticated: true,
 		installed: true,
@@ -36,7 +36,7 @@ mock.module("../../../packages/bridge/src/codex.ts", () => ({
 }));
 
 const { handleBridgeRequest } = await import(
-	"../../../packages/bridge/src/server.ts"
+	"../../../packages/hax-cli/src/bridge/server.ts"
 );
 
 const request: AppRequestShapeType = {

@@ -43,7 +43,6 @@
 		"node": ">=20"
 	},
 	"dependencies": {
-		"@polarish/bridge": "workspace:*",
 		"@oclif/core": "^4.2.10",
 		"dotenv": "^16.4.7",
 		"inquirer": "^13.4.0",
