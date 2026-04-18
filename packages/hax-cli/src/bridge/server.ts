@@ -3,6 +3,7 @@ import {
 	type ServerResponse,
 	createServer,
 } from "node:http";
+import { executeClaudeCode } from "./claude-code.js";
 import { executeCodex } from "./codex.js";
 import { type BridgeConfig, DEFAULT_BRIDGE_CONFIG } from "./config.js";
 import {
@@ -111,7 +112,7 @@ export async function handleBridgeRequest(
 
 		const body = await request.json();
 		const parsed = parseGenerateRequest(body);
-		const result = await executeCodex(parsed, {
+		const result = await executeProviderRequest(parsed, {
 			signal: request.signal,
 			transport: "sse",
 		});
@@ -147,11 +148,15 @@ function parseGenerateRequest(body: unknown): AppRequestShapeType {
 		});
 	}
 
-	if (body.provider !== "openai-codex") {
+	if (
+		body.provider !== "openai-codex" &&
+		body.provider !== "anthropic-claude-code"
+	) {
 		throw new BridgeError({
 			status: 400,
 			code: "unsupported_provider",
-			message: "The bridge only supports the openai-codex provider in v1.",
+			message:
+				"The bridge only supports the openai-codex and anthropic-claude-code providers in v1.",
 			detail:
 				typeof body.provider === "string"
 					? `Unsupported provider: ${body.provider}`
@@ -204,6 +209,29 @@ function parseGenerateRequest(body: unknown): AppRequestShapeType {
 	}
 
 	return body as AppRequestShapeType;
+}
+
+/**
+ * This dispatches one validated request to the matching local provider harness.
+ */
+async function executeProviderRequest(
+	request: AppRequestShapeType,
+	context: { signal?: AbortSignal; transport: "sse" },
+): Promise<UnifiedGenerateResultType> {
+	switch (request.provider) {
+		case "openai-codex":
+			return executeCodex(request, context);
+		case "anthropic-claude-code":
+			return executeClaudeCode(request, context);
+		default:
+			throw new BridgeError({
+				status: 400,
+				code: "unsupported_provider",
+				message:
+					"The bridge received an unsupported provider after validation.",
+				detail: `Unsupported provider: ${String(request.provider)}`,
+			});
+	}
 }
 
 function resultToResponse(result: UnifiedGenerateResultType): Response {

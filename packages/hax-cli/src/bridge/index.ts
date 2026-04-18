@@ -7,6 +7,10 @@ export {
 	writeBridgeConfig,
 } from "./config.js";
 export type { BridgeConfig } from "./config.js";
+export {
+	checkClaudeCodeAvailability,
+	executeClaudeCode,
+} from "./claude-code.js";
 export { checkCodexAvailability, executeCodex } from "./codex.js";
 export {
 	BridgeError,

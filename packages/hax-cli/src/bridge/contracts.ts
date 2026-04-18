@@ -27,7 +27,7 @@ type FileIdAttachmentSource = {
  */
 type AttachmentContent = {
 	type: "attachment";
-	kind: "image" | "file";
+	kind: "image" | "audio" | "video" | "document";
 	mimetype: string;
 	source: UrlAttachmentSource | Base64AttachmentSource | FileIdAttachmentSource;
 	filename?: string;
@@ -106,7 +106,7 @@ type ToolDefinition = {
  * This is the request shape that the bridge accepts from browser apps.
  */
 export type AppRequestShapeType = {
-	provider: "openai-codex";
+	provider: "openai-codex" | "anthropic-claude-code";
 	model: string;
 	system: string;
 	stream: boolean;
@@ -185,7 +185,7 @@ export type UnifiedResponseType = {
 	approvals: ApprovalRequest[];
 	finishReason?: ResponseFinishReasonType;
 	providerMetadata?: {
-		provider: "openai-codex";
+		provider: AppRequestShapeType["provider"];
 		requestId?: string;
 		model?: string;
 	};

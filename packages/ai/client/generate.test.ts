@@ -3,8 +3,8 @@ import type { AppRequestShapeType, UnifiedResponseType } from "../index.ts";
 import { generate } from "./generate.ts";
 
 const streamingRequest: AppRequestShapeType = {
-	provider: "openai-codex",
-	model: "gpt-5.4",
+	provider: "anthropic-claude-code",
+	model: "claude-sonnet-4-6",
 	system: "Be concise.",
 	stream: true,
 	temperature: 0.2,
@@ -54,7 +54,7 @@ describe("generate", () => {
 					'data: {"delta":"Hello"}',
 					"",
 					"event: final",
-					'data: {"status":"completed","text":"Hello","content":[{"type":"text","text":"Hello"}],"toolCalls":[],"approvals":[],"finishReason":"stop","providerMetadata":{"provider":"openai-codex"},"warnings":[]}',
+					'data: {"status":"completed","text":"Hello","content":[{"type":"text","text":"Hello"}],"toolCalls":[],"approvals":[],"finishReason":"stop","providerMetadata":{"provider":"anthropic-claude-code"},"warnings":[]}',
 					"",
 				].join("\n"),
 				{
@@ -99,7 +99,7 @@ describe("generate", () => {
 			approvals: [],
 			finishReason: "stop",
 			providerMetadata: {
-				provider: "openai-codex",
+				provider: "anthropic-claude-code",
 				responseId: "resp_789",
 			},
 			warnings: [],

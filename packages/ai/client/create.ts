@@ -1,4 +1,4 @@
-import type { appRequestShape } from "../providers/openai-codex/types.ts";
+import type { appRequestShape } from "../request.ts";
 import type { CreateClientOptions, UnifiedGenerateResult } from "../types.ts";
 import { generate } from "./generate.ts";
 import { run } from "./run.ts";

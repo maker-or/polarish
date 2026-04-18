@@ -5,8 +5,8 @@ import { create } from "./create.ts";
 const originalFetch = globalThis.fetch;
 
 const request: AppRequestShapeType = {
-	provider: "openai-codex",
-	model: "gpt-5.4",
+	provider: "anthropic-claude-code",
+	model: "claude-sonnet-4-6",
 	system: "Be concise.",
 	stream: false,
 	temperature: 0.2,
@@ -28,7 +28,7 @@ const finalResponse: UnifiedResponseType = {
 	approvals: [],
 	finishReason: "stop",
 	providerMetadata: {
-		provider: "openai-codex",
+		provider: "anthropic-claude-code",
 	},
 	warnings: [],
 };

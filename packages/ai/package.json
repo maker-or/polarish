@@ -17,6 +17,11 @@
 			"import": "./dist/providers/openai-codex/index.js",
 			"default": "./dist/providers/openai-codex/index.js"
 		},
+		"./anthropic-claude-code": {
+			"types": "./dist/providers/anthropic-claude-code/index.d.ts",
+			"import": "./dist/providers/anthropic-claude-code/index.js",
+			"default": "./dist/providers/anthropic-claude-code/index.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"publishConfig": {

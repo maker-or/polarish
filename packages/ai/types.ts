@@ -2,6 +2,7 @@ import { Schema } from "effect";
 
 export const Provider = Schema.Literal(
 	"openai-codex",
+	"anthropic-claude-code",
 	"anthropic",
 	"github-copilot",
 	"google-gemini-cli",

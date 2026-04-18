@@ -1,4 +1,4 @@
-import type { appRequestShape } from "../providers/openai-codex/types.ts";
+import type { appRequestShape } from "../request.ts";
 import type {
 	UnifiedGenerateResult,
 	UnifiedResponse,
@@ -14,7 +14,8 @@ type GenerateOptions = {
 
 /**
  * This sends a unified chat request to your local bridge endpoint.
- * The request must match `appRequestShape` (OpenAI Codex today): include `provider: "openai-codex"` and a `model` from the Codex model list.
+ * The request must match one of the supported provider request shapes and include
+ * the right `provider` and `model` pair for that provider.
  */
 export function generate(
 	request: appRequestShape & { stream: true },

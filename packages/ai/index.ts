@@ -82,12 +82,16 @@ export type {
 	Tool as ToolType,
 } from "./types.ts";
 
+export { appRequestShape } from "./request.ts";
+
+export type { appRequestShape as AppRequestShapeType } from "./request.ts";
+
 export {
 	CodexResponseStatus,
 	CodexReasoningEffort,
 	CodexModelId,
 	CodexReasoningSummary,
-	appRequestShape,
+	appRequestShape as openaiCodexAppRequestShape,
 	codexRequestShape,
 	CodexModelsSchema,
 } from "./providers/openai-codex/types.ts";
@@ -97,13 +101,26 @@ export type {
 	CodexModelIdType,
 	ReasoningEffort,
 	ReasoningSummary,
-	appRequestShape as AppRequestShapeType,
+	appRequestShape as OpenAICodexAppRequestShapeType,
 	CodexModelsSchema as CodexModelsSchemaType,
 	codexRequestShape as CodexRequestShapeType,
 } from "./providers/openai-codex/types.ts";
 
+export {
+	AnthropicClaudeCodeModelId,
+	AnthropicClaudeCodeModelsSchema,
+	appRequestShape as anthropicClaudeCodeAppRequestShape,
+} from "./providers/anthropic-claude-code/types.ts";
+
+export type {
+	AnthropicClaudeCodeModelIdType,
+	AnthropicClaudeCodeModelsSchema as AnthropicClaudeCodeModelsSchemaType,
+	appRequestShape as AnthropicClaudeCodeAppRequestShapeType,
+} from "./providers/anthropic-claude-code/types.ts";
+
 export { compileRequest } from "./providers/openai-codex/compile-request.ts";
 export { openaiCodex } from "./providers/openai-codex/models.ts";
+export { anthropicClaudeCode } from "./providers/anthropic-claude-code/models.ts";
 export {
 	emptyAccumulator,
 	mapChunk,

@@ -2,7 +2,7 @@ import {
 	appendAssistantFromUnifiedResponse,
 	toolExecutionToMessage,
 } from "../history/from-unified-response.ts";
-import type { appRequestShape } from "../providers/openai-codex/types.ts";
+import type { appRequestShape } from "../request.ts";
 import type {
 	ToolResultMessage,
 	UnifiedResponse,
@@ -195,7 +195,7 @@ async function runBatch(
 		lastResponse = response;
 
 		messages = appendAssistantFromUnifiedResponse(messages, response, {
-			provider: "openai-codex",
+			provider: request.provider,
 		});
 
 		const isToolCallTurn =
@@ -328,7 +328,7 @@ function runStreaming(
 				iterations++;
 
 				messages = appendAssistantFromUnifiedResponse(messages, response, {
-					provider: "openai-codex",
+					provider: request.provider,
 				});
 
 				const isToolCallTurn =

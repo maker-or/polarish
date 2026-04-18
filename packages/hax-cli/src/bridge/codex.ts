@@ -7,25 +7,21 @@ import {
 	type ResponseFinishReasonType,
 	type UnifiedGenerateResultType,
 	type UnifiedResponseStreamingResultType,
-	type UnifiedStreamEventPayload,
 	createUnifiedResponseStream,
 	unifiedResponseForStreamError,
 } from "./contracts.js";
 import { BridgeError } from "./errors.js";
+import {
+	type AdapterAvailability,
+	type ExecuteContext,
+	buildTranscript,
+	createEventQueue,
+	getNumber,
+	getString,
+	isRecord,
+} from "./shared.js";
 
 const execFileAsync = promisify(execFile);
-
-type AdapterAvailability = {
-	installed: boolean;
-	authenticated: boolean;
-	detail?: string;
-	version?: string;
-};
-
-type ExecuteContext = {
-	signal?: AbortSignal;
-	transport: "sse";
-};
 
 type JsonRpcRequestMessage = {
 	id: number;
@@ -270,7 +266,7 @@ export async function executeCodex(
 			model: request.model,
 			approvalPolicy: "never",
 			// Codex expects kebab-case permission variants on `thread/start`.
-			sandbox: "read-only",
+			sandbox: "workspace-write",
 			serviceName: "hax-bridge",
 		})) as {
 			thread?: { id?: unknown };
@@ -295,7 +291,7 @@ export async function executeCodex(
 			approvalPolicy: "never",
 			sandboxPolicy: {
 				// Codex expects camelCase permission variants on `sandboxPolicy.type`.
-				type: "readOnly",
+				type: "workspaceWrite",
 			},
 		});
 	} catch (error) {
@@ -539,7 +535,14 @@ function buildTurnInput(
 	warnings: string[],
 ): CodexInputItem[] {
 	const items: CodexInputItem[] = [];
-	const transcript = buildTranscript(request);
+	const transcript = [
+		request.system.trim()
+			? `System instructions:\n${request.system.trim()}`
+			: undefined,
+		buildTranscript(request),
+	]
+		.filter((value): value is string => Boolean(value))
+		.join("\n\n");
 	items.push({
 		type: "text",
 		text: transcript,
@@ -596,53 +599,6 @@ function buildTurnInput(
 	return items;
 }
 
-function buildTranscript(request: AppRequestShapeType): string {
-	const lines: string[] = [];
-	if (request.system.trim()) {
-		lines.push(`System instructions:\n${request.system.trim()}`);
-	}
-	lines.push("Conversation:");
-	for (const message of request.messages) {
-		const roleLabel =
-			message.role === "tool"
-				? `Tool ${message.toolName}`
-				: message.role.charAt(0).toUpperCase() + message.role.slice(1);
-		lines.push(`${roleLabel}: ${messageToText(message)}`);
-	}
-	return lines.join("\n\n");
-}
-
-function messageToText(
-	message: AppRequestShapeType["messages"][number],
-): string {
-	if (typeof message.content === "string") {
-		return message.content;
-	}
-
-	if (message.role === "assistant") {
-		return message.content
-			.map((part) => {
-				if (part.type === "text") {
-					return part.text;
-				}
-				if (part.type === "thinking") {
-					return `[thinking] ${part.thinking}`;
-				}
-				return `[toolcall ${part.name}] ${JSON.stringify(part.arguments)}`;
-			})
-			.join("\n");
-	}
-
-	return message.content
-		.map((part) => {
-			if (part.type === "text") {
-				return part.text;
-			}
-			return `[attachment ${part.kind}]`;
-		})
-		.join("\n");
-}
-
 function toUnifiedPartial(state: RunState) {
 	return {
 		status: "in_progress" as const,
@@ -672,65 +628,6 @@ function buildPartialContent(state: RunState): ResponseContentPartType[] {
 		}
 	}
 	return content;
-}
-
-function createEventQueue() {
-	const events: UnifiedStreamEventPayload[] = [];
-	const waiters: Array<{
-		reject: (reason?: unknown) => void;
-		resolve: (value: IteratorResult<UnifiedStreamEventPayload>) => void;
-	}> = [];
-	let closed = false;
-	let failure: unknown;
-
-	return {
-		events: {
-			[Symbol.asyncIterator](): AsyncIterator<UnifiedStreamEventPayload> {
-				return {
-					next(): Promise<IteratorResult<UnifiedStreamEventPayload>> {
-						if (failure) {
-							return Promise.reject(failure);
-						}
-						if (events.length > 0) {
-							return Promise.resolve({
-								value: events.shift() as UnifiedStreamEventPayload,
-								done: false,
-							});
-						}
-						if (closed) {
-							return Promise.resolve({
-								value: undefined,
-								done: true,
-							});
-						}
-						return new Promise((resolve, reject) => {
-							waiters.push({ resolve, reject });
-						});
-					},
-				};
-			},
-		},
-		close(): void {
-			closed = true;
-			while (waiters.length > 0) {
-				waiters.shift()?.resolve({ value: undefined, done: true });
-			}
-		},
-		push(event: UnifiedStreamEventPayload): void {
-			const waiter = waiters.shift();
-			if (waiter) {
-				waiter.resolve({ value: event, done: false });
-				return;
-			}
-			events.push(event);
-		},
-		pushError(error: unknown): void {
-			failure = error;
-			while (waiters.length > 0) {
-				waiters.shift()?.reject(error);
-			}
-		},
-	};
 }
 
 function createJsonRpcConnection(
@@ -918,24 +815,4 @@ function createCleanup(
 			child.kill();
 		}
 	};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function getNumber(
-	value: Record<string, unknown>,
-	key: string,
-): number | undefined {
-	const candidate = value[key];
-	return typeof candidate === "number" ? candidate : undefined;
-}
-
-function getString(
-	value: Record<string, unknown>,
-	key: string,
-): string | undefined {
-	const candidate = value[key];
-	return typeof candidate === "string" ? candidate : undefined;
 }

@@ -5,19 +5,20 @@
 ## Table of contents
 
 1. [Installation](#installation)
-2. [Quick start](#quick-start)
-3. [generate() — single request](#generate--single-request)
-4. [run() — agent loop](#run--agent-loop)
-5. [Request shape (`appRequestShape`)](#request-shape-apprequestshape)
-6. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
-7. [Defining tools](#defining-tools)
-8. [Manual tool loops with generate()](#manual-tool-loops-with-generate)
-9. [Backend & testing exports](#backend--testing-exports)
-10. [Errors & runtime](#errors--runtime)
-11. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
-12. [UnifiedResponse](#unifiedresponse)
-13. [generate() streaming events](#generate-streaming-events)
-14. [run() streaming events](#run-streaming-events)
+2. [Rules](#rules)
+3. [Quick start](#quick-start)
+4. [generate() — single request](#generate--single-request)
+5. [run() — agent loop](#run--agent-loop)
+6. [Request shape (`appRequestShape`)](#request-shape-apprequestshape)
+7. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
+8. [Defining tools](#defining-tools)
+9. [Manual tool loops with generate()](#manual-tool-loops-with-generate)
+10. [Backend & testing exports](#backend--testing-exports)
+11. [Errors & runtime](#errors--runtime)
+12. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
+13. [UnifiedResponse](#unifiedresponse)
+14. [generate() streaming events](#generate-streaming-events)
+15. [run() streaming events](#run-streaming-events)
 
 ---
 
@@ -29,14 +30,170 @@ bun add @polarish/ai
 
 ---
 
+## Rules
+
+These rules exist because the mistakes below are not obvious from the API surface alone — agents and developers reading the code will not infer them. Follow them in every integration.
+
+---
+
+### 1. Use `run()` for any request that involves tools. Never hand-roll the tool loop.
+
+If your request has `tools`, use `client.run()`. Do not call `client.generate()` inside a `while` loop, do not manually call `appendAssistantFromUnifiedResponse` between `generate()` calls, do not manage the iteration counter yourself. `run()` handles all of that correctly and handles edge cases (missing `execute`, error results, abort signals) that a hand-rolled loop will miss.
+
+```ts
+// ✓ tools involved — use run()
+const result = await client.run({ ...request, tools: [myTool], stream: true }, options);
+
+// ✗ tools involved — never do this
+let messages = [...];
+while (true) {
+  const r = await client.generate({ ...request, tools: [myTool], messages });
+  if (r.response.finishReason !== "tool-call") break;
+  // ... manually executing tools and appending — fragile, don't
+}
+```
+
+---
+
+### 2. Every tool passed to `run()` must have an `execute()` function.
+
+The model decides which tool to call. Your code runs it. If a tool in the `tools` array has no `execute()`, `run()` will send an error result back to the model for that call — the model may loop or fail. Always provide `execute()` for every tool you register.
+
+```ts
+const myTool = {
+  name: "readFile",
+  description: "Reads a file and returns its contents.",
+  inputSchema: z.object({ path: z.string() }),
+  execute: async (input: unknown) => {          // ← required
+    const { path } = mySchema.parse(input);
+    return fs.readFileSync(path, "utf8");
+  },
+};
+```
+
+---
+
+### 3. Never use `runner.events` and `runner.final()` together in the same code path.
+
+They return the same data. Using both sends `run_complete` twice if you are forwarding to SSE, or wastes a tick waiting for a promise that has already resolved.
+
+- Iterating events? Get the final result from the `run_complete` event (`event.response`, `event.messages`, `event.iterations`).
+- Not iterating events? Call `runner.final()` and await it.
+
+```ts
+// ✓ events path — read final data from run_complete
+for await (const event of runner.events) {
+  if (event.type === "run_complete") {
+    saveHistory(event.messages);
+  }
+}
+
+// ✓ final() path — no event loop
+const result = await runner.final();
+
+// ✗ both — run_complete will be emitted/sent twice
+for await (const event of runner.events) { forward(event); }
+const final = await runner.final();
+forward({ type: "run_complete", ...final }); // ← duplicate, never do this
+```
+
+---
+
+### 4. When forwarding `run()` events to HTTP SSE, forward `runner.events` directly. Never reconstruct events.
+
+The shape of every event in `runner.events` is already correct for JSON serialization. Pipe it straight to the response stream. Do not pull out fields and rebuild the object — you will miss fields or send stale data.
+
+```ts
+// ✓ correct
+for await (const event of runner.events) {
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+}
+
+// ✗ wrong — reconstructing run_complete after the loop already sent it
+const final = await runner.final();
+controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "run_complete", ...final })}\n\n`));
+```
+
+---
+
+### 5. Use `result.messages` from `run_complete` to continue the conversation. Do not track history yourself.
+
+`run()` builds and grows the history array internally. When the loop finishes, `run_complete.messages` (streaming) or `result.messages` (batch) contains the complete, correct history — user turns, all assistant turns, all tool results, in order. Pass it directly as `messages` on the next `run()` or `generate()` call.
+
+```ts
+// ✓ correct continuation
+const result = await client.run({ ...request, messages: previousMessages, stream: false });
+const nextMessages = result.messages; // ready to pass to the next call
+
+// ✗ wrong — building your own history alongside run()
+let myMessages = [...initialMessages];
+const result = await client.run({ ...request, messages: myMessages });
+myMessages.push(...); // don't do this — you don't know what run() appended internally
+```
+
+---
+
+### 6. Always set `toolCallId: call.callId ?? call.id` when building tool result messages manually.
+
+When using `generate()` with a manual loop (not `run()`), the provider returns two IDs on each tool call: `id` (the output item id, e.g. `fc_…`) and `callId` (the correlation id, e.g. `call_…`). The provider matches tool results by `callId`. If you use `call.id` when `callId` is present, the provider cannot correlate the result and the conversation will break.
+
+```ts
+// ✓ correct
+toolExecutionToMessage({ toolCallId: call.callId ?? call.id, ... })
+
+// ✗ wrong — ignores callId
+toolExecutionToMessage({ toolCallId: call.id, ... })
+```
+
+---
+
+### 7. `stream: true` on `run()` streams every turn, not just the final one.
+
+Setting `stream: true` means every `generate()` call inside the loop uses SSE. Text streams in character by character from the first turn. Tool calls stream their arguments as they arrive. There is no "batch mode for intermediate turns" — every turn is live. Do not set `stream: true` expecting only the final answer to stream.
+
+---
+
+### 8. Never call `generate()` or `run()` inside a tool's `execute()` function.
+
+Tools run locally and synchronously within the `run()` loop. Calling the AI client from inside `execute()` creates a nested agent — a separate loop inside a loop — which is almost never correct and will consume your `maxIterations` budget unpredictably. If you need the model to use multiple agents, design that at the orchestration layer, not inside a tool.
+
+---
+
+### 9. Do not read `event.partial` for final data. Use `run_complete` or `done`.
+
+`partial` on streaming events is a live snapshot taken at the moment the event was emitted. It is not the final response. Text may be incomplete, tool arguments may be partial JSON strings, usage may be zero. Always read final data from the terminal events: `run_complete.response` (run loop) or `done.response` (single generate() turn).
+
+```ts
+// ✓ final data
+if (event.type === "run_complete") use(event.response);
+if (event.type === "done") use(event.response);
+
+// ✗ partial — incomplete snapshot, not safe for persistence
+if (event.type === "text_delta") use(event.partial); // partial.text is not final
+```
+
+---
+
+### 10. Set `maxIterations` explicitly in production.
+
+The default is `10`. For production agents with bounded tasks, set it to the minimum reasonable number. An agent that calls tools in an unexpected loop will run until `maxIterations` before stopping — a lower value means less wasted cost.
+
+```ts
+client.run(request, { maxIterations: 5 }); // tight bound for known workflows
+```
+
+---
+
 ## Quick start
 
 `create(options)` returns a `Client` with two methods:
 
-| Method | What it does |
-| --- | --- |
-| `generate(request)` | Single HTTP request → one `UnifiedResponse`. You own the loop. |
+
+| Method                   | What it does                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------- |
+| `generate(request)`      | Single HTTP request → one `UnifiedResponse`. You own the loop.                                |
 | `run(request, options?)` | Full agent loop — tool execution, history, and re-calling `generate()` handled automatically. |
+
 
 ```ts
 import { create } from "@polarish/ai";
@@ -177,29 +334,139 @@ See [run() streaming events](#run-streaming-events) for the full event reference
 
 ### run() options
 
-| Option | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `maxIterations` | `number` | `10` | Hard cap on `generate()` calls. Prevents infinite tool loops. |
-| `onTurn` | `(turn: RunTurnEvent) => void` | — | Called after each completed turn. For streaming runs, prefer `run_turn_end` on `events`. |
-| `headers` | `Record<string, string>` | — | Extra HTTP headers forwarded to every `generate()` call. |
+
+| Option          | Type                           | Default | Notes                                                                                    |
+| --------------- | ------------------------------ | ------- | ---------------------------------------------------------------------------------------- |
+| `maxIterations` | `number`                       | `10`    | Hard cap on `generate()` calls. Prevents infinite tool loops.                            |
+| `onTurn`        | `(turn: RunTurnEvent) => void` | —       | Called after each completed turn. For streaming runs, prefer `run_turn_end` on `events`. |
+| `headers`       | `Record<string, string>`       | —       | Extra HTTP headers forwarded to every `generate()` call.                                 |
+
 
 ### run() result
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `response` | `UnifiedResponse` | The final assistant turn — the one where the model stopped requesting tools. |
-| `messages` | `message[]` | Full conversation history. Starts from `request.messages` and grows each turn. Pass back into the next `run()` to continue. |
-| `iterations` | `number` | Total `generate()` HTTP calls made. |
+
+| Field        | Type              | Notes                                                                                                                       |
+| ------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `response`   | `UnifiedResponse` | The final assistant turn — the one where the model stopped requesting tools.                                                |
+| `messages`   | `message[]`       | Full conversation history. Starts from `request.messages` and grows each turn. Pass back into the next `run()` to continue. |
+| `iterations` | `number`          | Total `generate()` HTTP calls made.                                                                                         |
+
 
 ### generate() vs run() — when to use which
 
-| Situation | Use |
-| --- | --- |
-| Simple Q&A, no tools | `generate()` |
-| Single-turn tool call, want full control | `generate()` + manual loop |
-| Multi-turn agent that calls tools | `run()` |
-| Need live UI updates (text streaming, tool cards) | `run({ stream: true })` |
-| Background job, no UI | `run({ stream: false })` |
+
+| Situation                                         | Use                        |
+| ------------------------------------------------- | -------------------------- |
+| Simple Q&A, no tools                              | `generate()`               |
+| Single-turn tool call, want full control          | `generate()` + manual loop |
+| Multi-turn agent that calls tools                 | `run()`                    |
+| Need live UI updates (text streaming, tool cards) | `run({ stream: true })`    |
+| Background job, no UI                             | `run({ stream: false })`   |
+
+
+---
+
+### events vs final() — pick one, not both
+
+`runner.events` and `runner.final()` give you the same data through different interfaces. **Do not use both in the same code path.**
+
+
+| You want                                            | Do this                                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| React to events as they arrive (UI, SSE forwarding) | `for await (const event of runner.events)` — `run_complete` is the last event and carries `response`, `messages`, `iterations` |
+| Just the final result, no event handling            | `const result = await runner.final()` — resolves when the loop finishes                                                        |
+
+
+`run_complete` is **always the last event** emitted. When your `for await` loop ends, the run is done. You do not need to call `final()` after iterating events.
+
+```ts
+// ✓ events only — get final data from run_complete
+for await (const event of runner.events) {
+  if (event.type === "run_complete") {
+    // event.response, event.messages, event.iterations are all here
+  }
+}
+
+// ✓ final() only — no event loop needed
+const result = await runner.final();
+
+// ✗ wrong — both paths; run_complete emitted twice
+for await (const event of runner.events) {
+  forward(event); // run_complete already sent here
+}
+const final = await runner.final();
+forward({ type: "run_complete", ...final }); // ← duplicate, never do this
+```
+
+---
+
+### Forwarding run() events to HTTP SSE
+
+When building a backend route that streams the agent loop to a browser, forward `runner.events` directly. Do not manually reconstruct `run_complete` after iterating — it is already in the event stream.
+
+```ts
+// ✓ correct SSE bridge
+const runner = await client.run({ ...request, stream: true }, { maxIterations: 10 });
+const encoder = new TextEncoder();
+
+const sseStream = new ReadableStream({
+  start(controller) {
+    (async () => {
+      try {
+        for await (const event of runner.events) {
+          // forward every event as-is — run_complete is the terminal frame
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+      } catch (e) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: "error",
+              error: { status: "failed", errorMessage: String(e) },
+            })}\n\n`,
+          ),
+        );
+      }
+      controller.close();
+    })();
+  },
+});
+
+return new Response(sseStream, {
+  headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+});
+```
+
+On the frontend, read `run_complete` to get the final history — no extra API call needed:
+
+```ts
+const eventSource = new EventSource("/api/agent");
+
+eventSource.onmessage = (e) => {
+  const event = JSON.parse(e.data);
+
+  switch (event.type) {
+    case "text_delta":
+      appendText(event.delta);
+      break;
+    case "run_tool_executing":
+      showToolCard(event.toolName, event.arguments);
+      break;
+    case "run_tool_executed":
+      updateToolCard(event.toolName, event.result, event.isError);
+      break;
+    case "run_complete":
+      // full history is here — save it and pass to next request to continue the conversation
+      saveHistory(event.messages);
+      eventSource.close();
+      break;
+    case "error":
+      showError(event.error.errorMessage);
+      eventSource.close();
+      break;
+  }
+};
+```
 
 ---
 
@@ -211,7 +478,7 @@ Codex-backed unified API:
 | Field         | Type               | Notes                                                                                                            |
 | ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `provider`    | `"openai-codex"`   | codex is the only provider supported right now we are working to intergate others like claude , gemini , copilot |
-| `model`       | `CodexModelId`     | e.g. `gpt-5.4` — import `CodexModelId` from `@polarish/ai/openai-codex`                                          |
+| `model`       | `CodexModelId`     | e.g. `gpt-5.4`                                                                                                   |
 | `system`      | `string`           | System / developer instructions                                                                                  |
 | `messages`    | `message[]`        | User, assistant, tool turns — [Messages](#messages-attachments-and-tool-ids)                                     |
 | `tools`       | `ToolDefinition[]` | Optional — [Defining tools](#defining-tools)                                                                     |
@@ -270,13 +537,13 @@ The `timestamp` field is optional on all roles. Set it when you need stable orde
 An `AttachmentContent` block has four fields:
 
 
-| Field      | Type                                       | Notes                                        |
-| ---------- | ------------------------------------------ | -------------------------------------------- |
-| `type`     | `"attachment"`                             | Always `"attachment"` — identifies the block |
-| `kind`     | `"image" | "audio" | "video" | "document"` | What kind of file this is                    |
-| `mimetype` | `string`                                   | e.g. `"image/png"`, `"application/pdf"`      |
-| `filename` | `string` *(optional)*                      | Hint to the model; not required              |
-| `source`   | One of three shapes (see below)            | Where the bytes come from                    |
+| Field      | Type                            | Notes                                        |
+| ---------- | ------------------------------- | -------------------------------------------- |
+| `type`     | `"attachment"`                  | Always `"attachment"` — identifies the block |
+| `kind`     | `"image"                        | "audio"                                      |
+| `mimetype` | `string`                        | e.g. `"image/png"`, `"application/pdf"`      |
+| `filename` | `string` *(optional)*           | Hint to the model; not required              |
+| `source`   | One of three shapes (see below) | Where the bytes come from                    |
 
 
 #### Three ways to supply the file
@@ -374,8 +641,6 @@ Assistant turns in history may contain text, optional reasoning (`thinking`), an
   stopReason: "stop",
 }
 ```
-
-
 
 When the model also thinks and calls a tool:
 
@@ -676,14 +941,16 @@ const second = await client.generate({ ..., messages });
 
 **History helpers:**
 
-| Export | Does |
-| --- | --- |
-| `appendAssistantFromUnifiedResponse` | Append completed assistant turn to `messages` |
-| `unifiedResponseToAssistantMessage` | Convert `UnifiedResponse` → assistant `message` (no append) |
-| `toolExecutionToMessage` | Build `role: "tool"` message after `execute()` |
-| `normalizeToolArgumentsForHistory` | Normalize tool args to `Record<string, unknown>` |
-| `finishReasonToStopReason` | Map `ResponseFinishReason` → `stopReason` |
-| `emptyUsage` | Zero `Usage` when the run omitted token counts |
+
+| Export                               | Does                                                        |
+| ------------------------------------ | ----------------------------------------------------------- |
+| `appendAssistantFromUnifiedResponse` | Append completed assistant turn to `messages`               |
+| `unifiedResponseToAssistantMessage`  | Convert `UnifiedResponse` → assistant `message` (no append) |
+| `toolExecutionToMessage`             | Build `role: "tool"` message after `execute()`              |
+| `normalizeToolArgumentsForHistory`   | Normalize tool args to `Record<string, unknown>`            |
+| `finishReasonToStopReason`           | Map `ResponseFinishReason` → `stopReason`                   |
+| `emptyUsage`                         | Zero `Usage` when the run omitted token counts              |
+
 
 ---
 
@@ -762,7 +1029,6 @@ Useful when **adapting** Codex streaming in tests or tools, or building **model 
 **Prefer `unifiedResponseToAssistantMessage` alone** when you only need the assistant object (for example to store one message in a database without copying the full `messages` array).
 
 ---
-
 
 ## UnifiedResponse
 
@@ -894,11 +1160,13 @@ Success end. **No `partial`** — `response` only.
 
 Fail or abort. **No `partial`** — `error` only.
 
+
 | Property | Type                     | Notes                                       |
 | -------- | ------------------------ | ------------------------------------------- |
 | `type`   | `"error"`                |                                             |
 | `reason` | `"error"` or `"aborted"` | Hard error vs cancel                        |
 | `error`  | `UnifiedResponse`        | Error payload (`status`, `errorMessage`, …) |
+
 
 ---
 
@@ -945,57 +1213,67 @@ run_complete         ← full loop finished
 
 Fires at the beginning of each `generate()` call in the loop. Use it to show a thinking indicator.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `type` | `"run_turn_start"` | |
-| `iteration` | `number` | Zero-based turn index |
+
+| Field       | Type               | Notes                 |
+| ----------- | ------------------ | --------------------- |
+| `type`      | `"run_turn_start"` |                       |
+| `iteration` | `number`           | Zero-based turn index |
+
 
 ### `run_tool_executing`
 
 Fires just before a tool's `execute()` is called locally. Use it to show "Running grep…" before the result is ready.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `type` | `"run_tool_executing"` | |
-| `iteration` | `number` | Turn index |
-| `toolName` | `string` | Name of the tool |
-| `toolCallId` | `string` | `callId ?? id` from the model's tool call |
-| `arguments` | `unknown` | Decoded arguments the model passed |
+
+| Field        | Type                   | Notes                                     |
+| ------------ | ---------------------- | ----------------------------------------- |
+| `type`       | `"run_tool_executing"` |                                           |
+| `iteration`  | `number`               | Turn index                                |
+| `toolName`   | `string`               | Name of the tool                          |
+| `toolCallId` | `string`               | `callId ?? id` from the model's tool call |
+| `arguments`  | `unknown`              | Decoded arguments the model passed        |
+
 
 ### `run_tool_executed`
 
 Fires after `execute()` completes or throws. Use it to display the result or error inline.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `type` | `"run_tool_executed"` | |
-| `iteration` | `number` | Turn index |
-| `toolName` | `string` | |
-| `toolCallId` | `string` | |
-| `result` | `unknown` | Return value from `execute()`, or an error message string |
-| `isError` | `boolean` | `true` if `execute()` threw or tool had no `execute` function |
+
+| Field        | Type                  | Notes                                                         |
+| ------------ | --------------------- | ------------------------------------------------------------- |
+| `type`       | `"run_tool_executed"` |                                                               |
+| `iteration`  | `number`              | Turn index                                                    |
+| `toolName`   | `string`              |                                                               |
+| `toolCallId` | `string`              |                                                               |
+| `result`     | `unknown`             | Return value from `execute()`, or an error message string     |
+| `isError`    | `boolean`             | `true` if `execute()` threw or tool had no `execute` function |
+
 
 ### `run_turn_end`
 
 Fires after all tools for a turn have been executed and results appended to history.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `type` | `"run_turn_end"` | |
-| `iteration` | `number` | Turn index |
-| `response` | `UnifiedResponse` | Completed assistant response for this turn |
+
+| Field         | Type                  | Notes                                                          |
+| ------------- | --------------------- | -------------------------------------------------------------- |
+| `type`        | `"run_turn_end"`      |                                                                |
+| `iteration`   | `number`              | Turn index                                                     |
+| `response`    | `UnifiedResponse`     | Completed assistant response for this turn                     |
 | `toolResults` | `ToolResultMessage[]` | Tool results executed this turn. Empty on the final stop turn. |
+
 
 ### `run_complete`
 
 Fires once when the entire loop finishes. Carries the same data as `RunResult`.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `type` | `"run_complete"` | |
-| `response` | `UnifiedResponse` | Final assistant response |
-| `messages` | `message[]` | Full conversation history |
-| `iterations` | `number` | Total `generate()` calls made |
+
+| Field        | Type              | Notes                         |
+| ------------ | ----------------- | ----------------------------- |
+| `type`       | `"run_complete"`  |                               |
+| `response`   | `UnifiedResponse` | Final assistant response      |
+| `messages`   | `message[]`       | Full conversation history     |
+| `iterations` | `number`          | Total `generate()` calls made |
+
 
 ---
 
