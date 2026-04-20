@@ -46,3 +46,6 @@ release/
 
 # Cursor/agent lock files
 skills-lock.json
+
+# Local tool / schema dumps
+.tmp

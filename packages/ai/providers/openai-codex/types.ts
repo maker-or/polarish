@@ -1,5 +1,11 @@
 import { Schema } from "effect";
-import { BaseModel, ToolDefinition, message } from "../../types.ts";
+import {
+	BaseModel,
+	McpServerStdioConfig,
+	ToolDefinition,
+	ToolExecutionCallbackConfig,
+	message,
+} from "../../types.ts";
 
 export const CodexResponseStatus = Schema.Literal(
 	"completed",
@@ -117,9 +123,9 @@ export const CodexModelId = Schema.Literal(
 	"gpt-5.2-codex",
 	"gpt-5.3-codex",
 	"gpt-5.3-codex-spark",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-	"gpt-5.4-nano"
+	"gpt-5.4",
+	"gpt-5.4-mini",
+	"gpt-5.4-nano",
 );
 
 /**
@@ -156,6 +162,10 @@ export const appRequestShape = Schema.Struct({
 	stream: Schema.Boolean,
 	messages: Schema.Array(message),
 	tools: Schema.optional(Schema.Array(ToolDefinition)),
+	mcpServers: Schema.optional(
+		Schema.Record({ key: Schema.String, value: McpServerStdioConfig }),
+	),
+	toolExecution: Schema.optional(ToolExecutionCallbackConfig),
 	temperature: Schema.Number,
 	maxRetries: Schema.Number,
 	signal: Schema.optional(Schema.instanceOf(AbortSignal)),

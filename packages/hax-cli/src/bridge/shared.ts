@@ -4,9 +4,19 @@ import type {
 } from "./contracts.js";
 
 /**
+ * This is one request-scoped logger helper for bridge tracing.
+ */
+export type BridgeRequestLogger = {
+	log(message: string, data?: unknown): void;
+	error(message: string, data?: unknown): void;
+	scope(scope: string): BridgeRequestLogger;
+};
+
+/**
  * This is the common runtime context that each bridge provider adapter receives.
  */
 export type ExecuteContext = {
+	requestId: string;
 	signal?: AbortSignal;
 	transport: "sse";
 };
@@ -20,6 +30,87 @@ export type AdapterAvailability = {
 	detail?: string;
 	version?: string;
 };
+
+/**
+ * This writes one bridge debug line with a stable prefix and timestamp.
+ */
+export function bridgeDebugLog(
+	scope: string,
+	message: string,
+	data?: unknown,
+): void {
+	const prefix = `[hax/bridge:${scope}]`;
+	const timestamp = new Date().toISOString();
+	if (data === undefined) {
+		console.log(timestamp, prefix, message);
+		return;
+	}
+	console.log(timestamp, prefix, message, data);
+}
+
+/**
+ * This writes one bridge error line with a stable prefix and timestamp.
+ */
+export function bridgeErrorLog(
+	scope: string,
+	message: string,
+	data?: unknown,
+): void {
+	const prefix = `[hax/bridge:${scope}]`;
+	const timestamp = new Date().toISOString();
+	if (data === undefined) {
+		console.error(timestamp, prefix, message);
+		return;
+	}
+	console.error(timestamp, prefix, message, data);
+}
+
+/**
+ * This creates one request-scoped logger so every nested function can include the same request id.
+ */
+export function createBridgeRequestLogger(
+	requestId: string,
+	scope: string,
+): BridgeRequestLogger {
+	const scopedName = `${scope}#${requestId}`;
+	return {
+		log(message: string, data?: unknown): void {
+			bridgeDebugLog(scopedName, message, data);
+		},
+		error(message: string, data?: unknown): void {
+			bridgeErrorLog(scopedName, message, data);
+		},
+		scope(childScope: string): BridgeRequestLogger {
+			return createBridgeRequestLogger(requestId, `${scope}/${childScope}`);
+		},
+	};
+}
+
+/**
+ * This builds a small request summary that is safe to print in bridge logs.
+ */
+export function summarizeAppRequest(
+	request: Pick<
+		AppRequestShapeType,
+		| "provider"
+		| "model"
+		| "stream"
+		| "messages"
+		| "tools"
+		| "mcpServers"
+		| "toolExecution"
+	>,
+): Record<string, unknown> {
+	return {
+		provider: request.provider,
+		model: request.model,
+		stream: request.stream,
+		messageCount: request.messages.length,
+		toolNames: request.tools?.map((tool) => tool.name) ?? [],
+		mcpServerAliases: request.mcpServers ? Object.keys(request.mcpServers) : [],
+		hasToolExecution: request.toolExecution !== undefined,
+	};
+}
 
 /**
  * This checks whether the value is a plain object record.

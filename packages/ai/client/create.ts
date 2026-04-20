@@ -1,5 +1,6 @@
 import type { appRequestShape } from "../request.ts";
 import type { CreateClientOptions, UnifiedGenerateResult } from "../types.ts";
+import { aiDebugLog } from "./debug.ts";
 import { generate } from "./generate.ts";
 import { run } from "./run.ts";
 import type { RunOptions, RunResult, RunStreamingResult } from "./run.ts";
@@ -42,10 +43,15 @@ function ensureTrailingSlash(value: string): string {
 
 function resolveEndpoint(baseUrl?: string): string {
 	const resolvedBaseUrl = baseUrl?.trim() || DEFAULT_BASE_URL;
-	return new URL(
+	const endpoint = new URL(
 		BRIDGE_ENDPOINT_PATH,
 		ensureTrailingSlash(resolvedBaseUrl),
 	).toString();
+	aiDebugLog("create", "resolved bridge endpoint", {
+		baseUrl: resolvedBaseUrl,
+		endpoint,
+	});
+	return endpoint;
 }
 
 export function create(options: CreateClientOptions): Client {

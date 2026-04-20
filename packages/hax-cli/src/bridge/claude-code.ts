@@ -16,10 +16,12 @@ import {
 	type AdapterAvailability,
 	type ExecuteContext,
 	buildTranscript,
+	createBridgeRequestLogger,
 	createEventQueue,
 	getNumber,
 	getString,
 	isRecord,
+	summarizeAppRequest,
 } from "./shared.js";
 
 const execFileAsync = promisify(execFile);
@@ -120,6 +122,8 @@ export async function executeClaudeCode(
 	request: AppRequestShapeType,
 	context: ExecuteContext,
 ): Promise<UnifiedGenerateResultType> {
+	const logger = createBridgeRequestLogger(context.requestId, "claude-code");
+	logger.log("claude execution start", summarizeAppRequest(request));
 	if (request.provider !== "anthropic-claude-code") {
 		throw new BridgeError({
 			status: 400,
@@ -131,22 +135,8 @@ export async function executeClaudeCode(
 		});
 	}
 
-	if (request.tools?.length) {
-		throw new BridgeError({
-			status: 400,
-			code: "claude_code_dynamic_tools_not_supported",
-			message:
-				"Claude Code bridge v1 does not support application tool definitions yet.",
-			suggestedAction:
-				"Remove `tools` from this request for now and rely on Claude Code built-in tools.",
-			metadata: {
-				provider: request.provider,
-				toolCount: request.tools.length,
-			},
-		});
-	}
-
 	const availability = await checkClaudeCodeAvailability();
+	logger.log("claude availability checked", availability);
 	if (!availability.installed) {
 		throw new BridgeError({
 			status: 503,
@@ -184,6 +174,9 @@ export async function executeClaudeCode(
 		stdio: ["ignore", "pipe", "pipe"],
 		shell: process.platform === "win32",
 	});
+	logger.log("spawned claude process", {
+		args,
+	});
 
 	if (!child.stdout || !child.stderr) {
 		throw new BridgeError({
@@ -201,6 +194,9 @@ export async function executeClaudeCode(
 			return;
 		}
 		settled = true;
+		logger.log("claude run finished successfully", {
+			finishReason: state.finishReason,
+		});
 		const response = toUnifiedResponse(request, state);
 		stream.controller.complete(response);
 		queue.push({
@@ -216,6 +212,10 @@ export async function executeClaudeCode(
 			return;
 		}
 		settled = true;
+		logger.error("claude run failed", {
+			error: error instanceof Error ? error.message : String(error),
+			stderr: stderrText.trim(),
+		});
 		const bridgeError =
 			error instanceof BridgeError
 				? error
@@ -263,6 +263,7 @@ export async function executeClaudeCode(
 				if (settled) {
 					return;
 				}
+				logger.log("abort signal received");
 				state.runStatus = "aborted";
 				state.finishReason = "abort";
 				state.errorMessage = "The request was aborted.";
@@ -283,6 +284,9 @@ export async function executeClaudeCode(
 		if (!line.trim()) {
 			return;
 		}
+		logger.log("claude stdout line", {
+			line,
+		});
 		try {
 			const event = JSON.parse(line) as unknown;
 			handleClaudeJsonLine(event, request, state, queue.push);
@@ -297,9 +301,15 @@ export async function executeClaudeCode(
 	child.stderr.on("data", (chunk) => {
 		stderrText +=
 			typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		logger.log("claude stderr", {
+			text: stderrText.trim(),
+		});
 	});
 
 	child.on("error", (error) => {
+		logger.error("claude child process error", {
+			error: error.message,
+		});
 		failRun(
 			new BridgeError({
 				status: 502,
@@ -312,6 +322,9 @@ export async function executeClaudeCode(
 
 	child.on("close", (code) => {
 		stdoutReader.close();
+		logger.log("claude process closed", {
+			exitCode: code,
+		});
 		if (settled) {
 			return;
 		}
@@ -339,6 +352,7 @@ export async function executeClaudeCode(
 	});
 
 	if (request.stream) {
+		logger.log("returning streaming claude result");
 		const result: UnifiedResponseStreamingResultType = {
 			...stream.result,
 			events: queue.events,
@@ -348,6 +362,10 @@ export async function executeClaudeCode(
 
 	try {
 		const response = await stream.result.final();
+		logger.log("returning batch claude result", {
+			finishReason: response.finishReason,
+			toolCalls: response.toolCalls.length,
+		});
 		return {
 			stream: false,
 			response,
@@ -399,6 +417,12 @@ function createRunState(request: AppRequestShapeType): ClaudeRunState {
 	const warnings: string[] = [
 		"Claude Code bridge v1 runs in `bypassPermissions` mode because non-interactive approval plumbing is not wired yet.",
 	];
+
+	if (request.mcpServers && Object.keys(request.mcpServers).length > 0) {
+		warnings.push(
+			"Bridge-mediated `mcpServers` is implemented for openai-codex only; configure MCP in Claude Code separately or use the Codex provider.",
+		);
+	}
 
 	if (request.messages.length > 1) {
 		warnings.push(

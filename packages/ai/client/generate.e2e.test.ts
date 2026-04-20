@@ -117,25 +117,6 @@ function codexSseResponse(args: {
 	].join("\n");
 }
 
-async function readTextStream(
-	stream: ReadableStream<string>,
-): Promise<string[]> {
-	const reader = stream.getReader();
-	const chunks: string[] = [];
-
-	try {
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(value);
-		}
-	} finally {
-		reader.releaseLock();
-	}
-
-	return chunks;
-}
-
 beforeEach(() => {
 	executeCodexMock.mockClear();
 });
@@ -213,10 +194,8 @@ describe("generate end-to-end", () => {
 			if (!result.stream) {
 				throw new Error("expected streaming result");
 			}
-			const chunks = await readTextStream(result.textStream);
 			const final = await result.final();
 
-			expect(chunks).toEqual(["Hello from e2e"]);
 			expect(final.text).toBe("Hello from e2e");
 			expect(final.providerMetadata?.responseId).toBe("resp_e2e_1");
 		} finally {

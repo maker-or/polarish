@@ -32,3 +32,25 @@ export function isAllowedOrigin(
 
 	return allowedOrigins.includes(origin);
 }
+
+/** Loopback http(s) only — avoids using the bridge as an SSRF relay for `toolExecution.callbackUrl`. */
+export function isLocalhostToolCallbackUrl(urlString: string): boolean {
+	try {
+		const url = new URL(urlString);
+		if (url.protocol !== "http:" && url.protocol !== "https:") {
+			return false;
+		}
+		if (url.username !== "" || url.password !== "") {
+			return false;
+		}
+		const host = url.hostname.toLowerCase();
+		return (
+			host === "127.0.0.1" ||
+			host === "localhost" ||
+			host === "[::1]" ||
+			host === "::1"
+		);
+	} catch {
+		return false;
+	}
+}

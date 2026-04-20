@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	type IncomingMessage,
 	type ServerResponse,
@@ -13,7 +14,8 @@ import {
 	unifiedResponseForStreamError,
 } from "./contracts.js";
 import { BridgeError, bridgeErrorResponse } from "./errors.js";
-import { isAllowedOrigin } from "./security.js";
+import { isAllowedOrigin, isLocalhostToolCallbackUrl } from "./security.js";
+import { createBridgeRequestLogger, summarizeAppRequest } from "./shared.js";
 
 function corsHeaders(origin: string | null, config: BridgeConfig): HeadersInit {
 	if (!isAllowedOrigin(origin, config.security.allowedOrigins)) {
@@ -54,6 +56,13 @@ export async function handleBridgeRequest(
 	config: BridgeConfig = DEFAULT_BRIDGE_CONFIG,
 ): Promise<Response> {
 	const origin = request.headers.get("origin");
+	const requestId = randomUUID();
+	const logger = createBridgeRequestLogger(requestId, "server");
+	logger.log("bridge request received", {
+		method: request.method,
+		url: request.url,
+		origin,
+	});
 
 	try {
 		const url = new URL(request.url);
@@ -68,6 +77,7 @@ export async function handleBridgeRequest(
 		// Browser preflight for `fetch(..., { method: "POST", content-type: "application/json" })`.
 		// We must respond to `OPTIONS` with CORS headers or the browser will block the real request.
 		if (request.method === "OPTIONS") {
+			logger.log("handling cors preflight");
 			if (!isAllowedOrigin(origin, config.security.allowedOrigins)) {
 				throw new BridgeError({
 					status: 403,
@@ -82,11 +92,15 @@ export async function handleBridgeRequest(
 				});
 			}
 
-			return applyCorsHeaders(
+			const response = applyCorsHeaders(
 				new Response(null, { status: 204 }),
 				origin,
 				config,
 			);
+			logger.log("cors preflight complete", {
+				status: response.status,
+			});
+			return response;
 		}
 
 		if (request.method !== "POST") {
@@ -111,14 +125,40 @@ export async function handleBridgeRequest(
 		}
 
 		const body = await request.json();
+		logger.log("request body parsed");
 		const parsed = parseGenerateRequest(body);
+		logger.log("request validated", summarizeAppRequest(parsed));
 		const result = await executeProviderRequest(parsed, {
+			requestId,
 			signal: request.signal,
 			transport: "sse",
 		});
-		return applyCorsHeaders(resultToResponse(result), origin, config);
+		logger.log("provider execution completed", {
+			stream: result.stream,
+		});
+		const response = applyCorsHeaders(
+			resultToResponse(result, logger.scope("response")),
+			origin,
+			config,
+		);
+		logger.log("bridge request completed", {
+			status: response.status,
+			responseType: response.headers.get("content-type"),
+		});
+		return response;
 	} catch (error) {
-		return applyCorsHeaders(bridgeErrorResponse(error), origin, config);
+		logger.error("bridge request failed", {
+			error: error instanceof Error ? error.message : String(error),
+		});
+		const response = applyCorsHeaders(
+			bridgeErrorResponse(error),
+			origin,
+			config,
+		);
+		logger.log("bridge error response sent", {
+			status: response.status,
+		});
+		return response;
 	}
 }
 
@@ -208,7 +248,65 @@ function parseGenerateRequest(body: unknown): AppRequestShapeType {
 		});
 	}
 
-	return body as AppRequestShapeType;
+	const parsed = body as AppRequestShapeType;
+	if (parsed.mcpServers !== undefined) {
+		if (!isMcpServersRecord(parsed.mcpServers)) {
+			throw new BridgeError({
+				status: 400,
+				code: "invalid_request",
+				message:
+					"When set, `mcpServers` must be an object whose values are `{ command: string, args?: string[], env?: Record<string,string> }`.",
+			});
+		}
+	}
+
+	if (parsed.toolExecution !== undefined) {
+		if (parsed.provider !== "openai-codex") {
+			throw new BridgeError({
+				status: 400,
+				code: "invalid_request",
+				message:
+					"`toolExecution` is only supported when `provider` is `openai-codex`.",
+			});
+		}
+		if (!isRecord(parsed.toolExecution)) {
+			throw new BridgeError({
+				status: 400,
+				code: "invalid_request",
+				message:
+					"When set, `toolExecution` must be an object with `callbackUrl` and `bearerToken` strings.",
+			});
+		}
+		const callbackUrl = parsed.toolExecution.callbackUrl;
+		const bearerToken = parsed.toolExecution.bearerToken;
+		if (typeof callbackUrl !== "string" || typeof bearerToken !== "string") {
+			throw new BridgeError({
+				status: 400,
+				code: "invalid_request",
+				message:
+					"`toolExecution.callbackUrl` and `toolExecution.bearerToken` must be strings.",
+			});
+		}
+		if (!isLocalhostToolCallbackUrl(callbackUrl)) {
+			throw new BridgeError({
+				status: 400,
+				code: "invalid_request",
+				message:
+					"`toolExecution.callbackUrl` must be an http(s) URL on localhost or 127.0.0.1.",
+				detail: callbackUrl,
+			});
+		}
+		if (bearerToken.length < 16) {
+			throw new BridgeError({
+				status: 400,
+				code: "invalid_request",
+				message:
+					"`toolExecution.bearerToken` is too short — use a long random secret.",
+			});
+		}
+	}
+
+	return parsed;
 }
 
 /**
@@ -216,7 +314,11 @@ function parseGenerateRequest(body: unknown): AppRequestShapeType {
  */
 async function executeProviderRequest(
 	request: AppRequestShapeType,
-	context: { signal?: AbortSignal; transport: "sse" },
+	context: {
+		requestId: string;
+		signal?: AbortSignal;
+		transport: "sse";
+	},
 ): Promise<UnifiedGenerateResultType> {
 	switch (request.provider) {
 		case "openai-codex":
@@ -234,8 +336,15 @@ async function executeProviderRequest(
 	}
 }
 
-function resultToResponse(result: UnifiedGenerateResultType): Response {
+function resultToResponse(
+	result: UnifiedGenerateResultType,
+	logger = createBridgeRequestLogger("no-request-id", "server/response"),
+): Response {
 	if (!result.stream) {
+		logger.log("serializing batch response", {
+			finishReason: result.response.finishReason,
+			toolCalls: result.response.toolCalls.length,
+		});
 		return Response.json(result.response, {
 			status: 200,
 			headers: {
@@ -248,10 +357,16 @@ function resultToResponse(result: UnifiedGenerateResultType): Response {
 		async start(controller) {
 			try {
 				for await (const event of result.events) {
+					logger.log("forwarding stream event", {
+						type: event.type,
+					});
 					controller.enqueue(encodeSseEvent(event.type, event));
 				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
+				logger.error("stream forwarding failed", {
+					error: message,
+				});
 				const payload: UnifiedStreamEventPayload = {
 					type: "error",
 					reason: "error",
@@ -259,6 +374,7 @@ function resultToResponse(result: UnifiedGenerateResultType): Response {
 				};
 				controller.enqueue(encodeSseEvent("error", payload));
 			} finally {
+				logger.log("stream response closed");
 				controller.close();
 			}
 		},
@@ -335,4 +451,35 @@ async function writeFetchResponse(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isMcpServersRecord(
+	value: unknown,
+): value is NonNullable<AppRequestShapeType["mcpServers"]> {
+	if (!isRecord(value)) {
+		return false;
+	}
+	for (const entry of Object.values(value)) {
+		if (!isRecord(entry) || typeof entry.command !== "string") {
+			return false;
+		}
+		if (entry.args !== undefined && !Array.isArray(entry.args)) {
+			return false;
+		}
+		if (
+			entry.args !== undefined &&
+			!entry.args.every((a) => typeof a === "string")
+		) {
+			return false;
+		}
+		if (entry.env !== undefined) {
+			if (!isRecord(entry.env)) {
+				return false;
+			}
+			if (!Object.values(entry.env).every((v) => typeof v === "string")) {
+				return false;
+			}
+		}
+	}
+	return true;
 }

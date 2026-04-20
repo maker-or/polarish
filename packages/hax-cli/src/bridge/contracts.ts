@@ -102,6 +102,17 @@ type ToolDefinition = {
 	rejectionMode?: "return_tool_error" | "abort_run";
 };
 
+export type McpServerStdioConfigType = {
+	command: string;
+	args?: string[];
+	env?: Record<string, string>;
+};
+
+export type ToolExecutionCallbackConfigType = {
+	callbackUrl: string;
+	bearerToken: string;
+};
+
 /**
  * This is the request shape that the bridge accepts from browser apps.
  */
@@ -114,6 +125,15 @@ export type AppRequestShapeType = {
 	maxRetries: number;
 	messages: Array<UserMessage | AssistantMessage | ToolMessage>;
 	tools?: ToolDefinition[];
+	/**
+	 * openai-codex only: MCP servers whose tools are registered as Codex experimental `dynamicTools`
+	 * and executed via `item/tool/call` → MCP `tools/call`.
+	 */
+	mcpServers?: Record<string, McpServerStdioConfigType>;
+	/**
+	 * openai-codex only: when set, non-`mcp__*` `item/tool/call` targets are POSTed here so the SDK can run `execute()` locally.
+	 */
+	toolExecution?: ToolExecutionCallbackConfigType;
 };
 
 /**

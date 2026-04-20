@@ -2,6 +2,14 @@
 	"name": "@polarish/ai",
 	"version": "0.1.0",
 	"type": "module",
+	"imports": {
+		"#tool-callback-host": {
+			"types": "./dist/client/tool-callback-host.node.d.ts",
+			"node": "./dist/client/tool-callback-host.node.js",
+			"browser": "./dist/client/tool-callback-host.stub.js",
+			"default": "./dist/client/tool-callback-host.node.js"
+		}
+	},
 	"files": ["dist/**/*.js", "dist/**/*.d.ts", "README.md"],
 	"sideEffects": false,
 	"main": "./dist/index.js",

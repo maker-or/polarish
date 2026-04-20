@@ -132,6 +132,38 @@ const rawOpenaiCodex = {
 		contextWindow: 272000,
 		maxTokens: 128000,
 	},
+	"gpt-5.4-mini": {
+		id: "gpt-5.4-mini",
+		name: "GPT-5.4 Mini",
+		provider: "openai-codex",
+		baseUrl: "https://chatgpt.com/backend-api",
+		reasoning: true,
+		input: ["text", "attachment"],
+		cost: {
+			input: 0.4,
+			output: 3.2,
+			cacheRead: 0.04,
+			cacheWrite: 0,
+		},
+		contextWindow: 272000,
+		maxTokens: 128000,
+	},
+	"gpt-5.4-nano": {
+		id: "gpt-5.4-nano",
+		name: "GPT-5.4 Nano",
+		provider: "openai-codex",
+		baseUrl: "https://chatgpt.com/backend-api",
+		reasoning: true,
+		input: ["text", "attachment"],
+		cost: {
+			input: 0.1,
+			output: 0.8,
+			cacheRead: 0.01,
+			cacheWrite: 0,
+		},
+		contextWindow: 272000,
+		maxTokens: 128000,
+	},
 };
 
 export const openaiCodex =

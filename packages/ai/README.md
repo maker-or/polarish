@@ -10,15 +10,17 @@
 4. [generate() — single request](#generate--single-request)
 5. [run() — agent loop](#run--agent-loop)
 6. [Request shape (`appRequestShape`)](#request-shape-apprequestshape)
-7. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
-8. [Defining tools](#defining-tools)
-9. [Manual tool loops with generate()](#manual-tool-loops-with-generate)
-10. [Backend & testing exports](#backend--testing-exports)
-11. [Errors & runtime](#errors--runtime)
-12. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
-13. [UnifiedResponse](#unifiedresponse)
-14. [generate() streaming events](#generate-streaming-events)
-15. [run() streaming events](#run-streaming-events)
+7. [Bridge-mediated MCP (`mcpServers`)](#bridge-mediated-mcp-mcpservers)
+8. [In-process tools with Codex (`toolExecution`)](#in-process-tools-with-codex-toolexecution)
+9. [Messages, attachments, and tool IDs](#messages-attachments-and-tool-ids)
+10. [Defining tools](#defining-tools)
+11. [Manual tool loops with generate()](#manual-tool-loops-with-generate)
+12. [Backend & testing exports](#backend--testing-exports)
+13. [Errors & runtime](#errors--runtime)
+14. [appendAssistantFromUnifiedResponse](#appendassistantfromunifiedresponse)
+15. [UnifiedResponse](#unifiedresponse)
+16. [generate() streaming events](#generate-streaming-events)
+17. [run() streaming events](#run-streaming-events)
 
 ---
 
@@ -472,21 +474,168 @@ eventSource.onmessage = (e) => {
 
 ## Request shape (`appRequestShape`)
 
-Codex-backed unified API:
+Unified API (provider-specific `model` unions — see `@polarish/ai` provider exports):
 
 
-| Field         | Type               | Notes                                                                                                            |
-| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `provider`    | `"openai-codex"`   | codex is the only provider supported right now we are working to intergate others like claude , gemini , copilot |
-| `model`       | `CodexModelId`     | e.g. `gpt-5.4`                                                                                                   |
-| `system`      | `string`           | System / developer instructions                                                                                  |
-| `messages`    | `message[]`        | User, assistant, tool turns — [Messages](#messages-attachments-and-tool-ids)                                     |
-| `tools`       | `ToolDefinition[]` | Optional — [Defining tools](#defining-tools)                                                                     |
-| `stream`      | `boolean`          | `false` → JSON body; `true` → SSE unified stream                                                                 |
-| `temperature` | `number`           | Sampling                                                                                                         |
-| `maxRetries`  | `number`           | SDK / transport retry hint                                                                                       |
-| `signal`      | `AbortSignal?`     | Abort HTTP                                                                                                       |
+| Field           | Type                                    | Notes                                                                                                                                                                                                                                                                                                              |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`      | `"openai-codex"`                        | `"anthropic-claude-code"`                                                                                                                                                                                                                                                                                          |
+| `model`         | provider-specific                       | e.g. Codex: `gpt-5.4`; Claude Code: model id from the SDK union                                                                                                                                                                                                                                                    |
+| `system`        | `string`                                | System / developer instructions                                                                                                                                                                                                                                                                                    |
+| `messages`      | `message[]`                             | User, assistant, tool turns — [Messages](#messages-attachments-and-tool-ids)                                                                                                                                                                                                                                       |
+| `tools`         | `ToolDefinition[]`                      | Optional — tools your app defines; with the Codex bridge and `execute`, see [In-process tools (`toolExecution`)](#in-process-tools-with-codex-toolexecution). [Defining tools](#defining-tools)                                                                                                                    |
+| `mcpServers`    | `Record<string, McpServerStdioConfig>?` | Optional — [Bridge-mediated MCP](#bridge-mediated-mcp-mcpservers). `**openai-codex` only** on the bridge today.                                                                                                                                                                                                    |
+| `toolExecution` | `ToolExecutionCallbackConfig?`          | Optional — **openai-codex** only on the bridge. Loopback callback so the bridge can run your `execute` in the same process as the caller — [In-process tools (`toolExecution`)](#in-process-tools-with-codex-toolexecution). Usually omitted: `run()` and `generate()` inject this when `tools` include `execute`. |
+| `stream`        | `boolean`                               | `false` → JSON body; `true` → SSE unified stream                                                                                                                                                                                                                                                                   |
+| `temperature`   | `number`                                | Sampling                                                                                                                                                                                                                                                                                                           |
+| `maxRetries`    | `number`                                | SDK / transport retry hint                                                                                                                                                                                                                                                                                         |
+| `signal`        | `AbortSignal?`                          | Abort HTTP                                                                                                                                                                                                                                                                                                         |
 
+
+`McpServerStdioConfig` is exported from `@polarish/ai` as `McpServerStdioConfig` / `McpServerStdioConfigType`.
+
+`ToolExecutionCallbackConfig` is exported as `ToolExecutionCallbackConfig` / `ToolExecutionCallbackConfigType` (`{ callbackUrl: string; bearerToken: string }`).
+
+---
+
+## Bridge-mediated MCP (`mcpServers`)
+
+When you use `create({ baseUrl })`, every `generate()` / `run()` call posts to the **local Polarish CLI bridge** (`POST {baseUrl}/v1/generate`). The bridge can spawn **stdio MCP servers** for a single request, register their tools as Codex **experimental dynamic tools**, and execute `tools/call` on your machine when the model uses them.
+
+This is **not** the same as the `tools` array on the request:
+
+
+| Mechanism         | Who defines tools                          | Who runs tool code                                                                                     |
+| ----------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `tools` + `run()` | Your app (`ToolDefinition` with `execute`) | Your Node process — locally in the `run()` loop, **or** via `toolExecution` + Codex bridge (see below) |
+| `toolExecution`   | (transport only; tools still from `tools`) | Your Node process — bridge POSTs to your localhost callback, which calls `execute`                     |
+| `mcpServers`      | MCP servers you name in the request        | Separate MCP server processes spawned by the bridge                                                    |
+
+
+### When to use `mcpServers`
+
+- You already have (or ship) an MCP server and want Codex in the bridge to call it **without** re-implementing each tool as a `ToolDefinition.execute`.
+- You are fine with the bridge spawning `command` with `args` on the user’s machine (same trust model as running the CLI locally).
+
+### Request shape
+
+`mcpServers` is an object whose **keys** are stable aliases (used to qualify tool names). Each value is:
+
+
+| Field     | Type                     | Required | Notes                                                             |
+| --------- | ------------------------ | -------- | ----------------------------------------------------------------- |
+| `command` | `string`                 | yes      | Executable to start the MCP server (e.g. `npx`, path to a binary) |
+| `args`    | `string[]`               | no       | Arguments after `command`                                         |
+| `env`     | `Record<string, string>` | no       | Extra environment variables for the child process                 |
+
+
+Example:
+
+```ts
+import { create } from "@polarish/ai";
+
+const client = create({ baseUrl: "http://127.0.0.1:4318" });
+
+await client.generate({
+  provider: "openai-codex",
+  model: "gpt-5.4",
+  system: "Use tools when they help answer the user.",
+  stream: false,
+  temperature: 0.3,
+  maxRetries: 0,
+  messages: [{ role: "user", content: "What is the weather in Paris?" }],
+  mcpServers: {
+    weather: {
+      command: "npx",
+      args: ["-y", "@some-org/mcp-weather-server"],
+    },
+  },
+});
+```
+
+On the wire, tools from that server are exposed to Codex under names:
+
+`mcp__{alias}__{originalToolName}` — e.g. `mcp__weather__get_forecast`.
+
+### Provider support
+
+- `openai-codex`: Supported end-to-end in the bridge (dynamic tools + MCP execution + streaming `toolcall_*` events for those calls when `stream: true`).
+- `anthropic-claude-code`: The SDK accepts `mcpServers` for type consistency, but the bridge **does not** run bridge-mediated MCP for Claude Code yet; you will get a **warning** in `UnifiedResponse.warnings` and should configure MCP in Claude Code separately if needed.
+
+### `run()` and `mcpServers`
+
+For **openai-codex**, tools with `**execute`** are driven through the bridge via `**toolExecution`** (see [In-process tools with Codex (`toolExecution`)](#in-process-tools-with-codex-toolexecution)); `run()` starts the localhost callback automatically. Dynamic tools invoked via `**mcpServers`** are executed **inside the bridge** against MCP; results are folded into the Codex turn automatically. You do **not** append `role: "tool"` messages yourself for MCP-backed calls.
+
+Do not combine overlapping names unless you intend to: `tools` names and `mcp__`* names are independent namespaces from the model’s perspective.
+
+### Security
+
+`mcpServers` is deserialized from the JSON body like the rest of the request. Anyone who can call your bridge can ask it to spawn processes. Lock down the bridge (localhost, allowed browser origins in CLI config) and only pass server definitions you trust.
+
+### Bridge behavior (reference)
+
+- Opts Codex app-server into **experimental** APIs so `dynamicTools` on `thread/start` is allowed.
+- Auto-responds to common Codex **approval** JSON-RPC prompts non-interactively so single-shot `generate()` can complete; see bridge release notes for details.
+- Token refresh (`account/chatgptAuthTokens/refresh`) still requires the user to fix auth out of band.
+
+---
+
+## In-process tools with Codex (`toolExecution`)
+
+`JSON.stringify` drops function values, so `**execute` never travels inside** `POST /v1/generate`. For **openai-codex** through the local bridge, the SDK can still run your tool functions **in the same Node process** as the caller by pairing wire-safe tool **schemas** with a **loopback HTTP callback** the bridge uses when Codex issues `item/tool/call`.
+
+### What `run()` and `generate()` do for you
+
+When `**provider`** is `**openai-codex**` and `**tools**` includes at least one entry with `**execute**`, both `**run()**` and `**generate()**` (including `create({ baseUrl }).generate(…)`) automatically:
+
+1. Start a short-lived HTTP server on `**127.0.0.1**` (random port) exposing `**POST /invoke**`.
+2. Generate a random secret and set `**toolExecution: { callbackUrl, bearerToken }**` on the request the bridge sees.
+3. Send only **JSON-serializable** tool definitions on the wire (names, descriptions, `inputSchema`) so Codex can register them as **dynamic tools** alongside any `[mcpServers](#bridge-mediated-mcp-mcpservers)` tools.
+
+For `**stream: true`**, the callback server stays open until the SSE stream finishes (when you drain `**events**` or when `**final()**` resolves).
+
+The bridge merges app tools from `**tools**` and MCP tools into one `**dynamicTools**` list on `**thread/start**`. Routing for `**item/tool/call**`:
+
+- Names prefixed with `**mcp__**` → MCP `**tools/call**` (see [Bridge-mediated MCP](#bridge-mediated-mcp-mcpservers)).
+- Any other name → `**POST**` to `**toolExecution.callbackUrl**` with header `**Authorization: Bearer <bearerToken>**` and body:
+
+```json
+{ "tool": "<name>", "arguments": <value> }
+```
+
+The callback handler runs the matching `**execute(arguments)**` and must respond with **200** and a JSON body Codex accepts as a dynamic tool result, for example:
+
+```json
+{
+  "contentItems": [{ "type": "inputText", "text": "result for the model" }],
+  "success": true
+}
+```
+
+On failure, still prefer **200** with `"success": false` and an `inputText` item explaining the error so the model can recover; non-2xx responses are turned into tool errors by the bridge.
+
+The Node implementation is `**createToolCallbackHost`** in `packages/ai/client/tool-callback-host.node.ts`. Browser bundles resolve a stub via `package.json` `imports` (`#tool-callback-host`, `browser` condition).
+
+### Raw `fetch` to the bridge (no SDK)
+
+If you post `**POST /v1/generate**` yourself, supply `**toolExecution**` and **schema-only** `**tools`**. You must keep the callback server alive for the entire Codex turn and verify `**bearerToken**`.
+
+### Combining with `mcpServers`
+
+Both mechanisms can appear on the same request. Keep `**tools[].name**` distinct from MCP qualified names (`mcp__{alias}__…`) unless you intend collisions.
+
+### `run()` + local tool loop guard
+
+If a response ever ends with `**finishReason: "tool-call"**` while you are already using the bridge callback, `run()` **skips** a second local execution pass for those calls so tools are not run twice. (Today’s Codex bridge path usually completes a turn with `**finishReason: "stop"`** even when dynamic tools ran mid-turn.)
+
+### Provider and bridge validation
+
+- `**openai-codex**`: Supported. The bridge requires `**toolExecution.callbackUrl**` to use `**http:**` or `**https:**` with hostname `**127.0.0.1**`, `**localhost**`, `**[::1]**`, or `**::1**` (no credentials in the URL). `**bearerToken**` must meet a minimum length.
+- `**anthropic-claude-code**`: The bridge **rejects** `**toolExecution`** with **400**.
+
+### Security
+
+Treat `**toolExecution`** like `**mcpServers**`: anyone who can POST to your bridge can trigger **your** callback process as long as they know the URL and token. Keep the bridge on **localhost**, restrict browser **origins** in CLI config, and use a **long random** bearer secret.
 
 ---
 

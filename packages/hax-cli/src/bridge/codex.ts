@@ -5,6 +5,7 @@ import {
 	type AppRequestShapeType,
 	type ResponseContentPartType,
 	type ResponseFinishReasonType,
+	type ToolExecutionCallbackConfigType,
 	type UnifiedGenerateResultType,
 	type UnifiedResponseStreamingResultType,
 	createUnifiedResponseStream,
@@ -12,13 +13,21 @@ import {
 } from "./contracts.js";
 import { BridgeError } from "./errors.js";
 import {
+	type CodexDynamicToolSpec,
+	McpBridgeRegistry,
+} from "./mcp/registry.js";
+import type { CodexDynamicToolCallContentItem } from "./mcp/stdio-client.js";
+import {
 	type AdapterAvailability,
+	type BridgeRequestLogger,
 	type ExecuteContext,
 	buildTranscript,
+	createBridgeRequestLogger,
 	createEventQueue,
 	getNumber,
 	getString,
 	isRecord,
+	summarizeAppRequest,
 } from "./shared.js";
 
 const execFileAsync = promisify(execFile);
@@ -43,8 +52,14 @@ type JsonRpcNotificationMessage = {
 	params?: unknown;
 };
 
+type ToolCallContentPart = Extract<
+	ResponseContentPartType,
+	{ type: "tool-call" }
+>;
+
 type RunState = {
-	content: ResponseContentPartType[];
+	autoInteractiveNoticeSent: boolean;
+	dynamicToolBlockByItemId: Map<string, { contentIndex: number; tool: string }>;
 	errorMessage?: string;
 	finishReason?: ResponseFinishReasonType;
 	reasoningStarted: Set<number>;
@@ -52,6 +67,9 @@ type RunState = {
 	runStatus: "in_progress" | "completed" | "failed" | "aborted";
 	text: string;
 	textBlockStarted: boolean;
+	toolCallContentIndex: number;
+	toolCallParts: ToolCallContentPart[];
+	toolCalls: ToolCallContentPart[];
 	turnId?: string;
 	warnings: string[];
 };
@@ -113,22 +131,12 @@ export async function executeCodex(
 	request: AppRequestShapeType,
 	context: ExecuteContext,
 ): Promise<UnifiedGenerateResultType> {
-	if (request.tools?.length) {
-		throw new BridgeError({
-			status: 400,
-			code: "codex_dynamic_tools_not_supported",
-			message:
-				"Codex bridge v1 does not support application tool definitions yet.",
-			suggestedAction:
-				"Remove `tools` from this request for now, or wait for dynamic tool support in the bridge.",
-			metadata: {
-				provider: request.provider,
-				toolCount: request.tools.length,
-			},
-		});
-	}
+	const { signal } = context;
+	const logger = createBridgeRequestLogger(context.requestId, "codex");
+	logger.log("codex execution start", summarizeAppRequest(request));
 
 	const availability = await checkCodexAvailability();
+	logger.log("codex availability checked", availability);
 	if (!availability.installed) {
 		throw new BridgeError({
 			status: 503,
@@ -156,24 +164,58 @@ export async function executeCodex(
 		});
 	}
 
-	void context.transport;
-
 	const stream = createUnifiedResponseStream();
 	const state = createRunState(request);
+	let mcpRegistry: McpBridgeRegistry | null = null;
+	if (request.mcpServers && Object.keys(request.mcpServers).length > 0) {
+		logger.log("creating mcp registry", {
+			serverAliases: Object.keys(request.mcpServers),
+		});
+		mcpRegistry = await McpBridgeRegistry.create(
+			request.mcpServers,
+			logger.scope("mcp"),
+		);
+		state.warnings.push(
+			`Bridge-mediated MCP: ${Object.keys(request.mcpServers).length} server(s), ${mcpRegistry.dynamicTools.length} tool(s) registered as Codex experimental dynamicTools.`,
+		);
+		logger.log("mcp registry ready", {
+			dynamicToolNames: mcpRegistry.dynamicTools.map((tool) => tool.name),
+		});
+	}
+
 	const queue = createEventQueue();
 	const child = spawn("codex", ["app-server"], {
 		stdio: ["pipe", "pipe", "pipe"],
 		shell: process.platform === "win32",
 	});
-	const connection = createJsonRpcConnection(child, queue.pushError);
-	const cleanup = createCleanup(
+	logger.log("spawned codex app-server");
+	const connection = createJsonRpcConnection(
+		child,
+		queue.pushError,
+		logger.scope("jsonrpc"),
+	);
+	const baseCleanup = createCleanup(
 		child,
 		connection,
 		queue.close,
 		stream.controller.error,
 	);
+	const cleanup = (cause?: unknown) => {
+		logger.log("cleanup start", {
+			hasCause: cause !== undefined,
+		});
+		mcpRegistry?.dispose();
+		mcpRegistry = null;
+		baseCleanup(cause);
+		logger.log("cleanup done");
+	};
 
 	const failRun = (error: unknown) => {
+		logger.error("codex run failed", {
+			error: error instanceof Error ? error.message : String(error),
+			runStatus: state.runStatus,
+			finishReason: state.finishReason,
+		});
 		const bridgeError =
 			error instanceof BridgeError
 				? error
@@ -202,13 +244,14 @@ export async function executeCodex(
 		cleanup(bridgeError);
 	};
 
-	if (context.signal) {
-		context.signal.addEventListener(
+	if (signal) {
+		signal.addEventListener(
 			"abort",
 			() => {
 				if (state.runStatus !== "in_progress") {
 					return;
 				}
+				logger.log("abort signal received");
 				state.runStatus = "aborted";
 				state.finishReason = "abort";
 				state.errorMessage = "The request was aborted.";
@@ -225,8 +268,15 @@ export async function executeCodex(
 	}
 
 	connection.onNotification((notification) => {
+		logger.log("jsonrpc notification", {
+			method: notification.method,
+		});
 		handleNotification(notification, state, queue);
 		if (notification.method === "turn/completed") {
+			logger.log("turn completed notification received", {
+				finishReason: state.finishReason,
+				toolCalls: state.toolCalls.length,
+			});
 			stream.controller.complete(toUnifiedResponse(request, state));
 			queue.push({
 				type: "done",
@@ -238,20 +288,96 @@ export async function executeCodex(
 	});
 
 	connection.onServerRequest(async (message) => {
+		logger.log("jsonrpc server request", {
+			id: message.id,
+			method: message.method,
+		});
+		if (message.method === "item/tool/call" && isRecord(message.params)) {
+			const tool =
+				typeof message.params.tool === "string" ? message.params.tool : "";
+			const args = message.params.arguments;
+			logger.log("tool call request received", {
+				tool,
+				hasArgs: args !== undefined,
+				usesMcp: tool.startsWith("mcp__"),
+				hasToolExecution: request.toolExecution !== undefined,
+			});
+
+			if (tool.startsWith("mcp__")) {
+				if (!mcpRegistry) {
+					logger.error("mcp tool requested without registry", {
+						tool,
+					});
+					await connection.respondWithResult(message.id, {
+						contentItems: [
+							{
+								type: "inputText",
+								text: "Codex requested an MCP tool but this run has no `mcpServers` registry.",
+							},
+						],
+						success: false,
+					});
+					return;
+				}
+				const result = await mcpRegistry.executeToolCall(tool, args);
+				logger.log("mcp tool call completed", {
+					tool,
+					success: result.success,
+					contentItems: result.contentItems.length,
+				});
+				await connection.respondWithResult(message.id, result);
+				return;
+			}
+
+			if (request.toolExecution) {
+				const result = await invokeAppToolCallback(
+					request.toolExecution,
+					tool,
+					args,
+					logger.scope("tool-callback"),
+				);
+				logger.log("app tool callback completed", {
+					tool,
+					success: result.success,
+					contentItems: result.contentItems.length,
+				});
+				await connection.respondWithResult(message.id, result);
+				return;
+			}
+
+			logger.error("tool call requested without execution config", {
+				tool,
+			});
+			await connection.respondWithResult(message.id, {
+				contentItems: [
+					{
+						type: "inputText",
+						text: "Codex requested a dynamic tool call but this run has neither `mcpServers` nor `toolExecution` configured.",
+					},
+				],
+				success: false,
+			});
+			return;
+		}
+
+		if (await tryRespondToCodexServerRequest(connection, message, state)) {
+			return;
+		}
+
 		await connection.respondWithError(
 			message.id,
 			-32601,
-			"Bridge v1 does not support server-initiated Codex requests.",
+			"Bridge v1 does not support this server-initiated Codex request.",
 		);
 		failRun(
 			new BridgeError({
 				status: 501,
 				code: "codex_server_request_not_supported",
 				message:
-					"Codex requested an interactive capability the bridge does not support yet.",
+					"Codex requested a capability the bridge does not implement yet.",
 				detail: `Unsupported server request: ${message.method}`,
 				suggestedAction:
-					"Retry with a simpler prompt that does not require local tools, approvals, or interactive Codex features.",
+					"Retry with a simpler prompt, re-authenticate if the session expired, or extend the bridge for this JSON-RPC method.",
 				metadata: {
 					method: message.method,
 					provider: request.provider,
@@ -262,13 +388,39 @@ export async function executeCodex(
 
 	try {
 		await connection.initialize();
-		const thread = (await connection.request("thread/start", {
+		logger.log("jsonrpc initialized");
+		const threadStartParams: Record<string, unknown> = {
 			model: request.model,
 			approvalPolicy: "never",
 			// Codex expects kebab-case permission variants on `thread/start`.
 			sandbox: "workspace-write",
 			serviceName: "hax-bridge",
-		})) as {
+		};
+		const appDynamicTools: CodexDynamicToolSpec[] = (request.tools ?? []).map(
+			(t) => ({
+				name: t.name,
+				description: typeof t.description === "string" ? t.description : "",
+				inputSchema: t.inputSchema ?? {
+					type: "object",
+					properties: {},
+					additionalProperties: true,
+				},
+			}),
+		);
+		const mergedDynamicTools = [
+			...appDynamicTools,
+			...(mcpRegistry?.dynamicTools ?? []),
+		];
+		if (mergedDynamicTools.length > 0) {
+			threadStartParams.dynamicTools = mergedDynamicTools;
+		}
+		logger.log("starting codex thread", {
+			dynamicToolNames: mergedDynamicTools.map((tool) => tool.name),
+		});
+		const thread = (await connection.request(
+			"thread/start",
+			threadStartParams,
+		)) as {
 			thread?: { id?: unknown };
 		};
 		const threadId = thread.thread?.id;
@@ -283,6 +435,9 @@ export async function executeCodex(
 			});
 		}
 
+		logger.log("codex thread started", {
+			threadId,
+		});
 		await connection.request("turn/start", {
 			threadId,
 			input: buildTurnInput(request, state.warnings),
@@ -294,12 +449,17 @@ export async function executeCodex(
 				type: "workspaceWrite",
 			},
 		});
+		logger.log("codex turn started", {
+			threadId,
+			warningCount: state.warnings.length,
+		});
 	} catch (error) {
 		cleanup();
 		throw error;
 	}
 
 	if (request.stream) {
+		logger.log("returning streaming codex result");
 		const result: UnifiedResponseStreamingResultType = {
 			...stream.result,
 			events: queue.events,
@@ -309,6 +469,10 @@ export async function executeCodex(
 
 	try {
 		const response = await stream.result.final();
+		logger.log("returning batch codex result", {
+			finishReason: response.finishReason,
+			toolCalls: response.toolCalls.length,
+		});
 		return {
 			stream: false,
 			response,
@@ -328,6 +492,94 @@ export async function executeCodex(
 	}
 }
 
+async function invokeAppToolCallback(
+	config: ToolExecutionCallbackConfigType,
+	tool: string,
+	args: unknown,
+	logger: BridgeRequestLogger,
+): Promise<{
+	contentItems: CodexDynamicToolCallContentItem[];
+	success: boolean;
+}> {
+	logger.log("invoking app tool callback", {
+		tool,
+		callbackUrl: config.callbackUrl,
+	});
+	const res = await fetch(config.callbackUrl, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			authorization: `Bearer ${config.bearerToken}`,
+		},
+		body: JSON.stringify({ tool, arguments: args }),
+		signal: AbortSignal.timeout(120_000),
+	});
+	const text = await res.text();
+	logger.log("app tool callback http response", {
+		tool,
+		status: res.status,
+		ok: res.ok,
+	});
+	if (!res.ok) {
+		logger.error("app tool callback returned non-ok status", {
+			tool,
+			status: res.status,
+			body: text,
+		});
+		return {
+			contentItems: [
+				{
+					type: "inputText",
+					text: `Tool callback HTTP ${res.status}: ${text}`,
+				},
+			],
+			success: false,
+		};
+	}
+	try {
+		const parsed = JSON.parse(text) as {
+			contentItems?: unknown;
+			success?: unknown;
+		};
+		if (!Array.isArray(parsed.contentItems)) {
+			logger.error("app tool callback json missing contentItems", {
+				tool,
+				body: text,
+			});
+			return {
+				contentItems: [
+					{
+						type: "inputText",
+						text:
+							text.length > 0
+								? text
+								: "Tool callback returned JSON without a contentItems array.",
+					},
+				],
+				success: false,
+			};
+		}
+		logger.log("app tool callback parsed", {
+			tool,
+			success: Boolean(parsed.success),
+			contentItems: parsed.contentItems.length,
+		});
+		return {
+			contentItems: parsed.contentItems as CodexDynamicToolCallContentItem[],
+			success: Boolean(parsed.success),
+		};
+	} catch {
+		logger.error("app tool callback returned non-json body", {
+			tool,
+			body: text,
+		});
+		return {
+			contentItems: [{ type: "inputText", text }],
+			success: false,
+		};
+	}
+}
+
 function createRunState(request: AppRequestShapeType): RunState {
 	const warnings: string[] = [];
 	if (request.messages.length > 1) {
@@ -336,12 +588,16 @@ function createRunState(request: AppRequestShapeType): RunState {
 		);
 	}
 	return {
-		content: [],
+		autoInteractiveNoticeSent: false,
+		dynamicToolBlockByItemId: new Map(),
 		reasoningStarted: new Set<number>(),
 		reasoningText: new Map<number, string>(),
 		runStatus: "in_progress",
 		text: "",
 		textBlockStarted: false,
+		toolCallContentIndex: 1,
+		toolCallParts: [],
+		toolCalls: [],
 		warnings,
 	};
 }
@@ -365,11 +621,15 @@ function toUnifiedResponse(request: AppRequestShapeType, state: RunState) {
 		}
 	}
 
+	for (const part of state.toolCallParts) {
+		content.push(part);
+	}
+
 	return {
 		status: state.runStatus,
 		...(state.text ? { text: state.text } : {}),
 		content,
-		toolCalls: [],
+		toolCalls: state.toolCalls,
 		approvals: [],
 		finishReason: state.finishReason,
 		providerMetadata: {
@@ -392,6 +652,77 @@ function toDoneReason(finishReason: ResponseFinishReasonType) {
 	return "stop" as const;
 }
 
+function noteAutoInteractiveCodexRequest(state: RunState): void {
+	if (state.autoInteractiveNoticeSent) {
+		return;
+	}
+	state.autoInteractiveNoticeSent = true;
+	state.warnings.push(
+		"Codex sent an approval or user-input request; the bridge responded automatically because /v1/generate is non-interactive.",
+	);
+}
+
+/** Auto-respond to Codex interactive JSON-RPC prompts; returns true if handled. */
+async function tryRespondToCodexServerRequest(
+	connection: {
+		respondWithResult: (id: number, result: unknown) => Promise<void>;
+	},
+	message: JsonRpcRequestMessage,
+	state: RunState,
+): Promise<boolean> {
+	switch (message.method) {
+		case "item/commandExecution/requestApproval":
+		case "item/fileChange/requestApproval":
+			noteAutoInteractiveCodexRequest(state);
+			await connection.respondWithResult(message.id, { decision: "accept" });
+			return true;
+		case "item/permissions/requestApproval":
+			noteAutoInteractiveCodexRequest(state);
+			await connection.respondWithResult(message.id, {
+				permissions: {},
+				scope: "turn",
+			});
+			return true;
+		case "item/tool/requestUserInput":
+			noteAutoInteractiveCodexRequest(state);
+			await connection.respondWithResult(message.id, { answers: {} });
+			return true;
+		case "mcpServer/elicitation/request":
+			noteAutoInteractiveCodexRequest(state);
+			await connection.respondWithResult(message.id, { action: "decline" });
+			return true;
+		case "applyPatchApproval":
+		case "execCommandApproval":
+			noteAutoInteractiveCodexRequest(state);
+			await connection.respondWithResult(message.id, { decision: "approved" });
+			return true;
+		default:
+			return false;
+	}
+}
+
+function pushDynamicToolCallStartEvents(
+	state: RunState,
+	queue: ReturnType<typeof createEventQueue>,
+	contentIndex: number,
+	arguments_: unknown,
+): void {
+	queue.push({
+		type: "toolcall_start",
+		contentIndex,
+		partial: toUnifiedPartial(state),
+	});
+	const argsText = arguments_ !== undefined ? JSON.stringify(arguments_) : "";
+	if (argsText.length > 0) {
+		queue.push({
+			type: "toolcall_delta",
+			contentIndex,
+			delta: argsText,
+			partial: toUnifiedPartial(state),
+		});
+	}
+}
+
 function handleNotification(
 	notification: JsonRpcNotificationMessage,
 	state: RunState,
@@ -409,6 +740,24 @@ function handleNotification(
 				type: "start",
 				partial: toUnifiedPartial(state),
 			});
+			break;
+		}
+		case "item/started": {
+			const item = isRecord(params.item) ? params.item : undefined;
+			if (!item || item.type !== "dynamicToolCall") {
+				break;
+			}
+			const itemId = typeof item.id === "string" ? item.id : "";
+			const tool = typeof item.tool === "string" ? item.tool : "";
+			const contentIndex = state.toolCallContentIndex;
+			state.toolCallContentIndex += 1;
+			state.dynamicToolBlockByItemId.set(itemId, { contentIndex, tool });
+			pushDynamicToolCallStartEvents(
+				state,
+				queue,
+				contentIndex,
+				item.arguments,
+			);
 			break;
 		}
 		case "item/agentMessage/delta": {
@@ -501,6 +850,41 @@ function handleNotification(
 						});
 					}
 				}
+			}
+			if (item.type === "dynamicToolCall") {
+				const itemId = typeof item.id === "string" ? item.id : "";
+				let block = state.dynamicToolBlockByItemId.get(itemId);
+				if (!block) {
+					const contentIndex = state.toolCallContentIndex;
+					state.toolCallContentIndex += 1;
+					const tool =
+						typeof item.tool === "string" ? item.tool : "unknown_tool";
+					block = { contentIndex, tool };
+					state.dynamicToolBlockByItemId.set(itemId, block);
+					pushDynamicToolCallStartEvents(
+						state,
+						queue,
+						block.contentIndex,
+						item.arguments,
+					);
+				}
+				const toolCall: ToolCallContentPart = {
+					type: "tool-call",
+					id: itemId || `dyn_${block.contentIndex}`,
+					name:
+						(typeof item.tool === "string" ? item.tool : undefined) ??
+						block.tool,
+					arguments: item.arguments,
+				};
+				state.toolCallParts.push(toolCall);
+				state.toolCalls.push(toolCall);
+				state.dynamicToolBlockByItemId.delete(itemId);
+				queue.push({
+					type: "toolcall_end",
+					contentIndex: block.contentIndex,
+					toolCall,
+					partial: toUnifiedPartial(state),
+				});
 			}
 			break;
 		}
@@ -604,7 +988,7 @@ function toUnifiedPartial(state: RunState) {
 		status: "in_progress" as const,
 		...(state.text ? { text: state.text } : {}),
 		content: buildPartialContent(state),
-		toolCalls: [],
+		toolCalls: state.toolCalls,
 		approvals: [],
 		warnings: state.warnings,
 	};
@@ -627,12 +1011,16 @@ function buildPartialContent(state: RunState): ResponseContentPartType[] {
 			});
 		}
 	}
+	for (const part of state.toolCallParts) {
+		content.push(part);
+	}
 	return content;
 }
 
 function createJsonRpcConnection(
 	child: ReturnType<typeof spawn>,
 	onFatalError: (error: unknown) => void,
+	logger: BridgeRequestLogger,
 ) {
 	if (!child.stdout || !child.stdin || !child.stderr) {
 		throw new BridgeError({
@@ -659,6 +1047,12 @@ function createJsonRpcConnection(
 	const rl = readline.createInterface({ input: child.stdout });
 
 	const writeMessage = (message: unknown) => {
+		if (isRecord(message)) {
+			logger.log("jsonrpc outbound", {
+				method: getString(message, "method"),
+				id: getNumber(message, "id"),
+			});
+		}
 		child.stdin?.write(`${JSON.stringify(message)}\n`);
 	};
 
@@ -668,6 +1062,12 @@ function createJsonRpcConnection(
 				| JsonRpcResponseMessage
 				| JsonRpcNotificationMessage
 				| JsonRpcRequestMessage;
+			logger.log("jsonrpc inbound line", {
+				hasId:
+					typeof (message as JsonRpcRequestMessage).id === "number" ||
+					typeof (message as JsonRpcResponseMessage).id === "number",
+				method: getString(message as Record<string, unknown>, "method"),
+			});
 			if (
 				typeof (message as JsonRpcRequestMessage).id === "number" &&
 				typeof (message as JsonRpcRequestMessage).method === "string"
@@ -688,6 +1088,11 @@ function createJsonRpcConnection(
 				}
 				pending.delete(response.id);
 				if (response.error) {
+					logger.error("jsonrpc response error", {
+						id: response.id,
+						code: response.error.code,
+						message: response.error.message,
+					});
 					waiter.reject(
 						new BridgeError({
 							status: 502,
@@ -702,6 +1107,9 @@ function createJsonRpcConnection(
 					);
 					return;
 				}
+				logger.log("jsonrpc response resolved", {
+					id: response.id,
+				});
 				waiter.resolve(response.result);
 				return;
 			}
@@ -711,15 +1119,26 @@ function createJsonRpcConnection(
 				}
 			}
 		} catch (error) {
+			logger.error("jsonrpc line parse failed", {
+				error: error instanceof Error ? error.message : String(error),
+				line,
+			});
 			onFatalError(error);
 		}
 	});
 
-	child.stderr.on("data", (_chunk) => {
-		// Codex may log informational lines on stderr; bridge v1 does not surface them.
+	child.stderr.on("data", (chunk) => {
+		const text =
+			typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		logger.log("codex stderr", {
+			text: text.trim(),
+		});
 	});
 
 	child.on("error", (error) => {
+		logger.error("codex child process error", {
+			error: error.message,
+		});
 		onFatalError(
 			new BridgeError({
 				status: 502,
@@ -745,17 +1164,22 @@ function createJsonRpcConnection(
 			}
 		},
 		async initialize(): Promise<void> {
+			logger.log("sending initialize request");
 			await this.request("initialize", {
 				clientInfo: {
 					name: "hax_bridge",
 					title: "Hax Bridge",
 					version: "0.1.0",
 				},
+				capabilities: {
+					experimentalApi: true,
+				},
 			});
 			writeMessage({
 				method: "initialized",
 				params: {},
 			});
+			logger.log("sent initialized notification");
 		},
 		onNotification(
 			listener: (message: JsonRpcNotificationMessage) => void,
@@ -782,12 +1206,26 @@ function createJsonRpcConnection(
 			code: number,
 			message: string,
 		): Promise<void> {
+			logger.error("jsonrpc respond with error", {
+				id,
+				code,
+				message,
+			});
 			writeMessage({
 				id,
 				error: {
 					code,
 					message,
 				},
+			});
+		},
+		async respondWithResult(id: number, result: unknown): Promise<void> {
+			logger.log("jsonrpc respond with result", {
+				id,
+			});
+			writeMessage({
+				id,
+				result,
 			});
 		},
 	};

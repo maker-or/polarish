@@ -1,3 +1,4 @@
+import { createToolCallbackHost } from "#tool-callback-host";
 import {
 	appendAssistantFromUnifiedResponse,
 	toolExecutionToMessage,
@@ -9,7 +10,13 @@ import type {
 	UnifiedStreamEventType,
 	message,
 } from "../types.ts";
+import {
+	codexExecutableTools,
+	prepareCodexToolBridgeRequest,
+} from "./codex-tool-callback-request.ts";
+import { aiDebugLog } from "./debug.ts";
 import { generate } from "./generate.ts";
+import type { ToolCallbackHost } from "./tool-callback-host.types.ts";
 
 const DEFAULT_MAX_ITERATIONS = 10;
 
@@ -169,71 +176,119 @@ async function runBatch(
 	request: appRequestShape & { stream: false },
 	options: RunOptions,
 ): Promise<RunResult> {
-	const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-	let messages: message[] = [...request.messages];
-	let iterations = 0;
-	let lastResponse: UnifiedResponse | undefined;
+	const execTools =
+		request.provider === "openai-codex"
+			? codexExecutableTools(request.tools)
+			: [];
+	const callbackHost =
+		request.provider === "openai-codex" && execTools.length > 0
+			? await createToolCallbackHost(execTools, request.signal)
+			: undefined;
+	const effectiveRequestBase =
+		callbackHost !== undefined
+			? prepareCodexToolBridgeRequest(request, callbackHost)
+			: request;
+	const skipLocalToolExecution = callbackHost !== undefined;
 
-	while (iterations < maxIterations) {
-		if (request.signal?.aborted) {
-			break;
-		}
-
-		const batchRequest: appRequestShape & { stream: false } = {
-			...request,
-			messages,
-			stream: false,
-		};
-
-		const result = await generate(batchRequest, {
-			endpoint: options.endpoint,
-			...(options.headers !== undefined ? { headers: options.headers } : {}),
-		});
-
-		iterations++;
-		const response = result.response;
-		lastResponse = response;
-
-		messages = appendAssistantFromUnifiedResponse(messages, response, {
+	try {
+		const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+		aiDebugLog("run", "batch loop start", {
 			provider: request.provider,
+			maxIterations,
+			toolNames: request.tools?.map((tool) => tool.name) ?? [],
 		});
+		let messages: message[] = [...request.messages];
+		let iterations = 0;
+		let lastResponse: UnifiedResponse | undefined;
 
-		const isToolCallTurn =
-			response.toolCalls.length > 0 && response.finishReason === "tool-call";
+		while (iterations < maxIterations) {
+			if (request.signal?.aborted) {
+				break;
+			}
 
-		if (!isToolCallTurn) {
+			const batchRequest: appRequestShape & { stream: false } = {
+				...effectiveRequestBase,
+				messages,
+				stream: false,
+			};
+
+			aiDebugLog("run", "batch turn generate", {
+				iteration: iterations,
+				toolNames: batchRequest.tools?.map((tool) => tool.name) ?? [],
+				hasToolExecution: "toolExecution" in batchRequest,
+			});
+			const result = await generate(batchRequest, {
+				endpoint: options.endpoint,
+				...(options.headers !== undefined ? { headers: options.headers } : {}),
+			});
+
+			iterations++;
+			const response = result.response;
+			lastResponse = response;
+			aiDebugLog("run", "batch turn response", {
+				iteration: iterations,
+				finishReason: response.finishReason,
+				toolCalls: response.toolCalls.length,
+			});
+
+			messages = appendAssistantFromUnifiedResponse(messages, response, {
+				provider: request.provider,
+			});
+
+			const isToolCallTurn =
+				response.toolCalls.length > 0 &&
+				response.finishReason === "tool-call" &&
+				!skipLocalToolExecution;
+			aiDebugLog("run", "batch turn classified", {
+				iteration: iterations - 1,
+				isToolCallTurn,
+				skipLocalToolExecution,
+			});
+
+			if (!isToolCallTurn) {
+				await options.onTurn?.({
+					iteration: iterations - 1,
+					response,
+					toolResults: [],
+				});
+				break;
+			}
+
+			aiDebugLog("run", "batch executing tools locally", {
+				iteration: iterations - 1,
+				toolNames: response.toolCalls.map((call) => call.name),
+			});
+			const toolResults = await executeTools(
+				response,
+				request.tools ?? [],
+				iterations - 1,
+			);
+
+			for (const toolResult of toolResults) {
+				messages.push(toolResult);
+			}
+
+			aiDebugLog("run", "batch turn done", {
+				iteration: iterations - 1,
+				toolResults: toolResults.map((tool) => tool.toolName),
+			});
 			await options.onTurn?.({
 				iteration: iterations - 1,
 				response,
-				toolResults: [],
+				toolResults,
 			});
-			break;
 		}
 
-		const toolResults = await executeTools(
-			response,
-			request.tools ?? [],
-			iterations - 1,
-		);
-
-		for (const toolResult of toolResults) {
-			messages.push(toolResult);
+		if (lastResponse === undefined) {
+			throw new Error(
+				"run() completed without any response — check that messages is non-empty and the endpoint is reachable.",
+			);
 		}
 
-		await options.onTurn?.({
-			iteration: iterations - 1,
-			response,
-			toolResults,
-		});
+		return { response: lastResponse, messages, iterations };
+	} finally {
+		callbackHost?.dispose();
 	}
-
-	if (lastResponse === undefined) {
-		throw new Error(
-			"run() completed without any response — check that messages is non-empty and the endpoint is reachable.",
-		);
-	}
-
-	return { response: lastResponse, messages, iterations };
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +347,32 @@ function runStreaming(
 	};
 
 	void (async () => {
+		let callbackHost: ToolCallbackHost | undefined;
 		try {
+			const execTools =
+				request.provider === "openai-codex"
+					? codexExecutableTools(request.tools)
+					: [];
+			aiDebugLog("run", "stream tool scan", {
+				provider: request.provider,
+				toolNames: execTools.map((tool) => tool.name),
+			});
+			callbackHost =
+				request.provider === "openai-codex" && execTools.length > 0
+					? await createToolCallbackHost(execTools, request.signal)
+					: undefined;
+			const effectiveRequestBase =
+				callbackHost !== undefined
+					? prepareCodexToolBridgeRequest(request, callbackHost)
+					: request;
+			const skipLocalToolExecution = callbackHost !== undefined;
+			aiDebugLog("run", "stream request ready", {
+				provider: request.provider,
+				hasCallbackHost: callbackHost !== undefined,
+				hasToolExecution: "toolExecution" in effectiveRequestBase,
+				toolNames: effectiveRequestBase.tools?.map((tool) => tool.name) ?? [],
+			});
+
 			const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 			let messages: message[] = [...request.messages];
 			let iterations = 0;
@@ -303,14 +383,23 @@ function runStreaming(
 					break;
 				}
 
+				aiDebugLog("run", "stream turn start", {
+					iteration: iterations,
+					messageCount: messages.length,
+				});
 				push({ type: "run_turn_start", iteration: iterations });
 
 				const streamRequest: appRequestShape & { stream: true } = {
-					...request,
+					...effectiveRequestBase,
 					messages,
 					stream: true,
 				};
 
+				aiDebugLog("run", "stream turn generate", {
+					iteration: iterations,
+					toolNames: streamRequest.tools?.map((tool) => tool.name) ?? [],
+					hasToolExecution: "toolExecution" in streamRequest,
+				});
 				const turnResult = await generate(streamRequest, {
 					endpoint: options.endpoint,
 					...(options.headers !== undefined
@@ -326,6 +415,11 @@ function runStreaming(
 				const response = await turnResult.final();
 				lastResponse = response;
 				iterations++;
+				aiDebugLog("run", "stream turn response", {
+					iteration: iterations - 1,
+					finishReason: response.finishReason,
+					toolCalls: response.toolCalls.length,
+				});
 
 				messages = appendAssistantFromUnifiedResponse(messages, response, {
 					provider: request.provider,
@@ -333,11 +427,21 @@ function runStreaming(
 
 				const isToolCallTurn =
 					response.toolCalls.length > 0 &&
-					response.finishReason === "tool-call";
+					response.finishReason === "tool-call" &&
+					!skipLocalToolExecution;
+				aiDebugLog("run", "stream turn classified", {
+					iteration: iterations - 1,
+					isToolCallTurn,
+					skipLocalToolExecution,
+				});
 
 				const toolResults: ToolResultMessage[] = [];
 
 				if (isToolCallTurn) {
+					aiDebugLog("run", "stream executing local tools", {
+						iteration: iterations - 1,
+						toolNames: response.toolCalls.map((call) => call.name),
+					});
 					const tools = request.tools ?? [];
 
 					for (const call of response.toolCalls) {
@@ -358,6 +462,11 @@ function runStreaming(
 						if (typeof toolDef?.execute !== "function") {
 							result = `Tool "${call.name}" has no execute function registered.`;
 							isError = true;
+							aiDebugLog("run", "stream tool missing execute", {
+								iteration: iterations - 1,
+								toolName: call.name,
+								toolCallId,
+							});
 						} else {
 							try {
 								result = await (
@@ -366,6 +475,12 @@ function runStreaming(
 							} catch (err) {
 								result = err instanceof Error ? err.message : String(err);
 								isError = true;
+								aiDebugLog("run", "stream tool execute error", {
+									iteration: iterations - 1,
+									toolName: call.name,
+									toolCallId,
+									error: result,
+								});
 							}
 						}
 
@@ -384,6 +499,12 @@ function runStreaming(
 							result,
 							isError,
 						});
+						aiDebugLog("run", "stream tool executed", {
+							iteration: iterations - 1,
+							toolName: call.name,
+							toolCallId,
+							isError,
+						});
 						toolResults.push(toolMsg);
 						messages.push(toolMsg);
 					}
@@ -395,6 +516,10 @@ function runStreaming(
 					response,
 					toolResults,
 				});
+				aiDebugLog("run", "stream turn done", {
+					iteration: iterations - 1,
+					toolResults: toolResults.map((tool) => tool.toolName),
+				});
 				await options.onTurn?.({
 					iteration: iterations - 1,
 					response,
@@ -402,6 +527,9 @@ function runStreaming(
 				});
 
 				if (!isToolCallTurn) {
+					aiDebugLog("run", "stream loop stop", {
+						iteration: iterations - 1,
+					});
 					break;
 				}
 			}
@@ -417,6 +545,10 @@ function runStreaming(
 				messages,
 				iterations,
 			};
+			aiDebugLog("run", "stream complete", {
+				iterations,
+				toolCalls: lastResponse.toolCalls.length,
+			});
 
 			push({ type: "run_complete", ...finalResult });
 			finalResolve(finalResult);
@@ -424,6 +556,8 @@ function runStreaming(
 			finalReject(err);
 			closeEvents(err);
 			return;
+		} finally {
+			callbackHost?.dispose();
 		}
 
 		closeEvents();
@@ -475,8 +609,18 @@ async function executeTools(
 	for (const call of response.toolCalls) {
 		const toolDef = tools.find((t) => t.name === call.name);
 		const toolCallId = call.callId ?? call.id;
+		aiDebugLog("run", "batch tool executing", {
+			iteration,
+			toolName: call.name,
+			toolCallId,
+		});
 
 		if (typeof toolDef?.execute !== "function") {
+			aiDebugLog("run", "batch tool missing execute", {
+				iteration,
+				toolName: call.name,
+				toolCallId,
+			});
 			results.push(
 				toolExecutionToMessage({
 					toolCallId,
@@ -492,6 +636,11 @@ async function executeTools(
 			const output = await (
 				toolDef.execute as (input: unknown) => Promise<unknown>
 			)(call.arguments);
+			aiDebugLog("run", "batch tool executed", {
+				iteration,
+				toolName: call.name,
+				toolCallId,
+			});
 			results.push(
 				toolExecutionToMessage({
 					toolCallId,
@@ -501,11 +650,18 @@ async function executeTools(
 				}),
 			);
 		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			aiDebugLog("run", "batch tool execute error", {
+				iteration,
+				toolName: call.name,
+				toolCallId,
+				error: message,
+			});
 			results.push(
 				toolExecutionToMessage({
 					toolCallId,
 					toolName: call.name,
-					result: err instanceof Error ? err.message : String(err),
+					result: message,
 					isError: true,
 				}),
 			);

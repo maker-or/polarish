@@ -1,5 +1,6 @@
 import { Effect, Array as EffectArray, JSONSchema, Schema, pipe } from "effect";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { aiDebugLog } from "../../client/debug.ts";
 import type {
 	AttachmentContent,
 	TextContent,
@@ -575,6 +576,24 @@ const compileToolDefinition = (
 	strict: true,
 });
 
+/**
+ * This turns live `ToolDefinition` values into JSON-safe Codex `dynamicTools` entries for the local bridge.
+ * Call from `run()` before `POST /v1/generate` so `inputSchema` is strict JSON Schema on the wire.
+ */
+export function toolsToBridgeDynamicToolSpecs(
+	tools: ReadonlyArray<NonNullable<appRequestShape["tools"]>[number]>,
+): Array<{ name: string; description: string; inputSchema: unknown }> {
+	const specs = tools.map((tool) => ({
+		name: tool.name,
+		description: tool.description,
+		inputSchema: normalizeToolInputSchema(tool),
+	}));
+	aiDebugLog("codex-compile", "built dynamic tool specs", {
+		toolNames: specs.map((tool) => tool.name),
+	});
+	return specs;
+}
+
 export const compileRequest = (request: appRequestShape): codexRequestShape =>
 	Effect.runSync(
 		Effect.gen(function* () {
@@ -585,16 +604,21 @@ export const compileRequest = (request: appRequestShape): codexRequestShape =>
 				Effect.map((items) => items.flat()),
 			);
 
+			const compiledTools = request.tools?.length
+				? request.tools.map(compileToolDefinition)
+				: undefined;
+			aiDebugLog("codex-compile", "compiled request", {
+				model: request.model,
+				messageCount: compiledMessages.length,
+				toolNames: request.tools?.map((tool) => tool.name) ?? [],
+			});
+
 			return {
 				model: request.model,
 				// Upstream requires `instructions` always present (never omit / undefined).
 				instructions: request.system ?? "",
 				input: compiledMessages,
-				...(request.tools?.length
-					? {
-							tools: request.tools.map(compileToolDefinition),
-						}
-					: {}),
+				...(compiledTools ? { tools: compiledTools } : {}),
 				stream: request.stream,
 				store: false,
 			};

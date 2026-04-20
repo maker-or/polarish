@@ -5,7 +5,13 @@ import type {
 	UnifiedResponseBatchResult,
 	UnifiedResponseStreamingResult,
 } from "../types.ts";
+import {
+	assertCodexBridgeRequestHasToolExecutionIfNeeded,
+	attachCodexToolHostCleanupToStream,
+	startCodexToolCallbackIfNeeded,
+} from "./codex-tool-callback-request.ts";
 import { consumeUnifiedStream } from "./consume-unified-stream.ts";
+import { aiDebugLog } from "./debug.ts";
 
 type GenerateOptions = {
 	endpoint: string;
@@ -37,30 +43,84 @@ export async function generate(
 		throw new Error("Fetch implementation is required");
 	}
 
-	const { signal, ...serializableRequest } = request;
-	const headers = new Headers(options.headers);
-	headers.set("content-type", "application/json");
+	let host: Awaited<ReturnType<typeof startCodexToolCallbackIfNeeded>>["host"];
+	let streamHostCleanupAttached = false;
 
-	const response = await globalThis.fetch(options.endpoint, {
-		method: "POST",
-		headers,
-		body: JSON.stringify(serializableRequest),
-		...(signal ? { signal } : {}),
-	});
+	try {
+		aiDebugLog("generate", "start request", {
+			provider: request.provider,
+			stream: request.stream,
+			toolNames: request.tools?.map((tool) => tool.name) ?? [],
+		});
+		const started = await startCodexToolCallbackIfNeeded(request);
+		host = started.host;
+		const bridgedRequest = started.request;
+		assertCodexBridgeRequestHasToolExecutionIfNeeded(bridgedRequest);
+		aiDebugLog("generate", "bridge request ready", {
+			provider: bridgedRequest.provider,
+			toolExecution: "toolExecution" in bridgedRequest,
+			hasTools:
+				Array.isArray(bridgedRequest.tools) && bridgedRequest.tools.length > 0,
+		});
 
-	if (request.stream) {
-		return consumeUnifiedStream(response);
+		const { signal, ...serializableRequest } = bridgedRequest;
+		const headers = new Headers(options.headers);
+		headers.set("content-type", "application/json");
+		aiDebugLog("generate", "posting to bridge", {
+			endpoint: options.endpoint,
+		});
+
+		const response = await globalThis.fetch(options.endpoint, {
+			method: "POST",
+			headers,
+			body: JSON.stringify(serializableRequest),
+			...(signal ? { signal } : {}),
+		});
+		aiDebugLog("generate", "bridge response received", {
+			ok: response.ok,
+			status: response.status,
+			stream: request.stream,
+		});
+
+		if (request.stream) {
+			const streaming = consumeUnifiedStream(response);
+			aiDebugLog("generate", "streaming response started", {
+				hasToolCallbackHost: host !== undefined,
+			});
+			if (host) {
+				streamHostCleanupAttached = true;
+				return attachCodexToolHostCleanupToStream(streaming, () => {
+					aiDebugLog("generate", "dispose tool callback host after stream");
+					host?.dispose();
+				});
+			}
+			return streaming;
+		}
+
+		if (!response.ok) {
+			const errorBody = await response.text();
+			aiDebugLog("generate", "bridge request failed", {
+				status: response.status,
+				body: errorBody,
+			});
+			throw new Error(
+				`Request failed with status ${response.status}: ${errorBody}`,
+			);
+		}
+
+		const finalResponse = (await response.json()) as UnifiedResponse;
+		aiDebugLog("generate", "batch response parsed", {
+			status: finalResponse.status,
+			finishReason: finalResponse.finishReason,
+			toolCalls: finalResponse.toolCalls.length,
+		});
+		return {
+			stream: false,
+			response: finalResponse,
+		};
+	} finally {
+		if (host && !streamHostCleanupAttached) {
+			host.dispose();
+		}
 	}
-
-	if (!response.ok) {
-		throw new Error(
-			`Request failed with status ${response.status}: ${await response.text()}`,
-		);
-	}
-
-	const finalResponse = (await response.json()) as UnifiedResponse;
-	return {
-		stream: false,
-		response: finalResponse,
-	};
 }

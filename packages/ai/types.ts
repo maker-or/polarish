@@ -310,6 +310,26 @@ export const ToolDefinition = Schema.Struct({
 });
 
 /**
+ * This is one stdio MCP server entry for bridge-mediated tool execution (Codex dynamicTools).
+ */
+export const McpServerStdioConfig = Schema.Struct({
+	command: Schema.String,
+	args: Schema.optional(Schema.Array(Schema.String)),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+});
+
+/**
+ * When set on openai-codex requests, the bridge POSTs each `item/tool/call` to this URL (localhost only)
+ * so the SDK can run `execute()` in the same process as `run()`.
+ */
+export const ToolExecutionCallbackConfig = Schema.Struct({
+	callbackUrl: Schema.String,
+	bearerToken: Schema.String,
+});
+
+/**
  * This is the shared request shape for callers that want to send full message history.
  */
 export const requestShape = Schema.Struct({
