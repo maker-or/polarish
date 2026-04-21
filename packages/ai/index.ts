@@ -159,12 +159,12 @@ export type {
 	RunCompleteEvent,
 } from "./client/run.ts";
 export {
-	appendAssistantFromUnifiedResponse,
+	appendAssistant,
 	emptyUsage,
 	finishReasonToStopReason,
 	normalizeToolArgumentsForHistory,
 	toolExecutionToMessage,
-	unifiedResponseToAssistantMessage,
+	toAssistantMessage,
 } from "./history/from-unified-response.ts";
 export type {
 	ToolExecutionToMessageInput,

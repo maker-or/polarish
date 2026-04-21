@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { UnifiedResponse } from "../types.ts";
 import {
-	appendAssistantFromUnifiedResponse,
+	appendAssistant,
 	emptyUsage,
 	finishReasonToStopReason,
 	normalizeToolArgumentsForHistory,
+	toAssistantMessage,
 	toolExecutionToMessage,
-	unifiedResponseToAssistantMessage,
 } from "./from-unified-response.ts";
 
 function baseResponse(
@@ -23,7 +23,7 @@ function baseResponse(
 	};
 }
 
-describe("unifiedResponseToAssistantMessage", () => {
+describe("toAssistantMessage", () => {
 	test("maps text, reasoning, and tool-call parts in order", () => {
 		const response = baseResponse({
 			content: [
@@ -63,7 +63,7 @@ describe("unifiedResponseToAssistantMessage", () => {
 			},
 		});
 
-		const assistant = unifiedResponseToAssistantMessage(response, {
+		const assistant = toAssistantMessage(response, {
 			timestamp: 99,
 		});
 
@@ -106,7 +106,7 @@ describe("unifiedResponseToAssistantMessage", () => {
 			],
 		});
 
-		const assistant = unifiedResponseToAssistantMessage(response);
+		const assistant = toAssistantMessage(response);
 		expect(assistant.content[0]).toEqual({ type: "text", text: "Visible" });
 	});
 
@@ -123,7 +123,7 @@ describe("unifiedResponseToAssistantMessage", () => {
 			],
 		});
 
-		const assistant = unifiedResponseToAssistantMessage(response);
+		const assistant = toAssistantMessage(response);
 		expect(assistant.content).toEqual([
 			{ type: "text", text: "ok" },
 			{
@@ -135,29 +135,15 @@ describe("unifiedResponseToAssistantMessage", () => {
 		]);
 	});
 
-	test("throws when provider is missing", () => {
+	test("omits provider when metadata omits provider", () => {
 		const response = {
 			...baseResponse({
 				content: [{ type: "text", text: "x" }],
 			}),
 			providerMetadata: {},
 		} as UnifiedResponse;
-		expect(() => unifiedResponseToAssistantMessage(response)).toThrow(
-			/unifiedResponseToAssistantMessage needs a provider/,
-		);
-	});
-
-	test("uses options.provider when metadata omits provider", () => {
-		const response = {
-			...baseResponse({
-				content: [{ type: "text", text: "x" }],
-			}),
-			providerMetadata: {},
-		} as UnifiedResponse;
-		const assistant = unifiedResponseToAssistantMessage(response, {
-			provider: "openai-codex",
-		});
-		expect(assistant.provider).toBe("openai-codex");
+		const assistant = toAssistantMessage(response);
+		expect(assistant.provider).toBeUndefined();
 	});
 
 	test("includes errorMessage when present", () => {
@@ -165,7 +151,7 @@ describe("unifiedResponseToAssistantMessage", () => {
 			content: [],
 			errorMessage: "boom",
 		});
-		const assistant = unifiedResponseToAssistantMessage(response);
+		const assistant = toAssistantMessage(response);
 		expect(assistant.errorMessage).toBe("boom");
 	});
 });
@@ -215,10 +201,10 @@ describe("toolExecutionToMessage", () => {
 	});
 });
 
-describe("appendAssistantFromUnifiedResponse", () => {
-	test("appends assistant turn", () => {
+describe("append helpers", () => {
+	test("appendAssistant appends assistant turn", () => {
 		const prior = [{ role: "user" as const, content: "hi", timestamp: 1 }];
-		const next = appendAssistantFromUnifiedResponse(
+		const next = appendAssistant(
 			prior,
 			baseResponse({ content: [{ type: "text", text: "yo" }] }),
 		);

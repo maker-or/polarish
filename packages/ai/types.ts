@@ -149,13 +149,14 @@ export const UserMessage = Schema.Struct({
 
 /**
  * This is an assistant message that callers can keep in history for agent loops.
+ * `provider` is optional because some provider responses may omit provider metadata.
  * `timestamp` is optional when you only need the model payload shape; set it when persisting history.
  */
 export const baseAssistantMessage = Schema.Struct({
 	role: Schema.Literal("assistant"),
 	content: Schema.Array(Schema.Union(TextContent, ThinkingContent, Toolcall)),
 	usage: Usage,
-	provider: Provider,
+	provider: Schema.optional(Provider),
 	stopReason: StopReason,
 	errorMessage: Schema.optional(Schema.String),
 	timestamp: Schema.optional(Schema.Number),

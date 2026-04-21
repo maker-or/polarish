@@ -1,5 +1,4 @@
 import type {
-	Provider,
 	ResponseContentPart,
 	ResponseFinishReason,
 	ResponseToolCallPart,
@@ -28,14 +27,9 @@ export type ToolExecutionToMessageInput = {
 };
 
 /**
- * This is the optional configuration for `unifiedResponseToAssistantMessage`.
+ * This is the optional configuration for `toAssistantMessage`.
  */
 export type UnifiedResponseToAssistantOptions = {
-	/**
-	 * This is used when `response.providerMetadata?.provider` is missing.
-	 * You should pass the same provider you used on the request when metadata is absent.
-	 */
-	provider?: Provider;
 	timestamp?: number;
 	/**
 	 * This overrides usage when the response did not include token usage (common in some streams).
@@ -91,18 +85,8 @@ export function finishReasonToStopReason(
 
 function resolveProvider(
 	response: UnifiedResponse,
-	options: UnifiedResponseToAssistantOptions | undefined,
-): Provider {
-	const fromMeta = response.providerMetadata?.provider;
-	if (fromMeta !== undefined) {
-		return fromMeta;
-	}
-	if (options?.provider !== undefined) {
-		return options.provider;
-	}
-	throw new Error(
-		"unifiedResponseToAssistantMessage needs a provider: set `response.providerMetadata.provider` or pass `options.provider`.",
-	);
+): baseAssistantMessage["provider"] {
+	return response.providerMetadata?.provider;
 }
 
 /**
@@ -171,11 +155,11 @@ function appendOrphanToolCalls(
  * When `response.text` is set but no text block came from `content`, this prepends a single text block
  * so you still recover the visible assistant text.
  */
-export function unifiedResponseToAssistantMessage(
+export function toAssistantMessage(
 	response: UnifiedResponse,
 	options?: UnifiedResponseToAssistantOptions,
 ): baseAssistantMessage {
-	const provider = resolveProvider(response, options);
+	const provider = resolveProvider(response);
 	const usage = options?.usage ?? response.usage ?? emptyUsage();
 	const content: AssistantContentBlock[] = [];
 
@@ -198,7 +182,7 @@ export function unifiedResponseToAssistantMessage(
 		role: "assistant",
 		content,
 		usage,
-		provider,
+		...(provider !== undefined ? { provider } : {}),
 		stopReason: finishReasonToStopReason(response.finishReason),
 		timestamp: options?.timestamp ?? Date.now(),
 		...(response.errorMessage !== undefined
@@ -231,20 +215,19 @@ export function toolExecutionToMessage(
 
 /**
  * This appends the assistant turn from a unified response and returns a new messages array.
- * It delegates to {@link unifiedResponseToAssistantMessage}: maps `response.content` (text,
+ * It delegates to {@link toAssistantMessage}: maps `response.content` (text,
  * reasoning, tool-call parts), fills text from `response.text` when needed, merges orphan
  * `response.toolCalls`, and sets usage / stopReason / provider. Tool results are not included;
  * after you run tools, append with {@link toolExecutionToMessage} before the next `generate`.
  *
  * @param messages - Prior conversation turns for the next agent step.
  * @param response - Final `UnifiedResponse` from batch `generate` or `final()` / `done` when streaming.
- * @param options - Optional `provider` if `response.providerMetadata.provider` is missing, optional
- *   `usage` when the run omitted usage, optional `timestamp` for the assistant message.
+ * @param options - Optional `usage` when run omitted usage, and optional `timestamp` for assistant message.
  */
-export function appendAssistantFromUnifiedResponse(
+export function appendAssistant(
 	messages: ReadonlyArray<message>,
 	response: UnifiedResponse,
 	options?: UnifiedResponseToAssistantOptions,
 ): message[] {
-	return [...messages, unifiedResponseToAssistantMessage(response, options)];
+	return [...messages, toAssistantMessage(response, options)];
 }

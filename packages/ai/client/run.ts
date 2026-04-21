@@ -1,6 +1,6 @@
 import { createToolCallbackHost } from "#tool-callback-host";
 import {
-	appendAssistantFromUnifiedResponse,
+	appendAssistant,
 	toolExecutionToMessage,
 } from "../history/from-unified-response.ts";
 import type { appRequestShape } from "../request.ts";
@@ -231,9 +231,7 @@ async function runBatch(
 				toolCalls: response.toolCalls.length,
 			});
 
-			messages = appendAssistantFromUnifiedResponse(messages, response, {
-				provider: request.provider,
-			});
+			messages = appendAssistant(messages, response);
 
 			const isToolCallTurn =
 				response.toolCalls.length > 0 &&
@@ -421,9 +419,7 @@ function runStreaming(
 					toolCalls: response.toolCalls.length,
 				});
 
-				messages = appendAssistantFromUnifiedResponse(messages, response, {
-					provider: request.provider,
-				});
+				messages = appendAssistant(messages, response);
 
 				const isToolCallTurn =
 					response.toolCalls.length > 0 &&
