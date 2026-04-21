@@ -22,13 +22,12 @@ polarish origins remove https://app.example.com
 bun add -g @polarish/cli
 ```
 
-(`npm i -g @polarish/cli` works the same.)
+## Important first step
 
-## What gets published
+After installing the package, you must run:
 
-The npm tarball includes the compiled CLI under `dist/`, including `**dist/bridge/**` (the HTTP server and Codex adapter). Consumers install **one** package; they do not install `@polarish/bridge` separately.
+```bash
+polarish
+```
 
-## Related
-
-- `[@polarish/ai](https://www.npmjs.com/package/@polarish/ai)` — browser/app SDK that calls `POST {baseUrl}/v1/generate` against this bridge.
-
+This first run is required. It will guide you through installing and authenticating Codex and/or Claude Code.

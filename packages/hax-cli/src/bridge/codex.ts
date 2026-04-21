@@ -394,7 +394,7 @@ export async function executeCodex(
 			approvalPolicy: "never",
 			// Codex expects kebab-case permission variants on `thread/start`.
 			sandbox: "workspace-write",
-			serviceName: "hax-bridge",
+			serviceName: "polarish-bridge",
 		};
 		const appDynamicTools: CodexDynamicToolSpec[] = (request.tools ?? []).map(
 			(t) => ({
@@ -1167,8 +1167,8 @@ function createJsonRpcConnection(
 			logger.log("sending initialize request");
 			await this.request("initialize", {
 				clientInfo: {
-					name: "hax_bridge",
-					title: "Hax Bridge",
+					name: "polarish_bridge",
+					title: "Polarish Bridge",
 					version: "0.1.0",
 				},
 				capabilities: {

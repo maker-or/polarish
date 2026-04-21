@@ -41,8 +41,12 @@ release/
 *.sln
 *.sw?
 
-#agents
+# Agent / editor state
 .agents
+.cursor
+
+# App workspace
+apps
 
 # Cursor/agent lock files
 skills-lock.json

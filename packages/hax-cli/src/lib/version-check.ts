@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import semver from "semver";
-import { getHaxConfigDir } from "./paths.js";
+import { getPolarishConfigDir } from "./paths.js";
 
 const CACHE_FILE = "version-check.json";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -12,7 +12,7 @@ type VersionCache = {
 };
 
 function getCachePath() {
-	return path.join(getHaxConfigDir(), CACHE_FILE);
+	return path.join(getPolarishConfigDir(), CACHE_FILE);
 }
 
 async function readCache(): Promise<VersionCache | null> {
@@ -25,7 +25,7 @@ async function readCache(): Promise<VersionCache | null> {
 }
 
 async function writeCache(cache: VersionCache) {
-	await mkdir(getHaxConfigDir(), { recursive: true, mode: 0o700 });
+	await mkdir(getPolarishConfigDir(), { recursive: true, mode: 0o700 });
 	await writeFile(getCachePath(), JSON.stringify(cache, null, 2), {
 		encoding: "utf8",
 		mode: 0o600,
@@ -82,7 +82,7 @@ export async function maybePrintUpdateNotice(options: {
 	) {
 		if (semver.gt(cache.lastLatest, options.currentVersion)) {
 			process.stderr.write(
-				`\nA newer version of ${options.packageName} is available: ${cache.lastLatest} (you have ${options.currentVersion}). Run: hax update\n\n`,
+				`\nA newer version of ${options.packageName} is available: ${cache.lastLatest} (you have ${options.currentVersion}). Run: polarish update\n\n`,
 			);
 		}
 		return;
@@ -102,7 +102,7 @@ export async function maybePrintUpdateNotice(options: {
 
 	if (latest && semver.gt(latest, options.currentVersion)) {
 		process.stderr.write(
-			`\nA newer version of ${options.packageName} is available: ${latest} (you have ${options.currentVersion}). Run: hax update\n\n`,
+			`\nA newer version of ${options.packageName} is available: ${latest} (you have ${options.currentVersion}). Run: polarish update\n\n`,
 		);
 	}
 }

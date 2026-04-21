@@ -9,7 +9,7 @@ export default class Update extends Command {
 	static override id = "update";
 
 	static override description =
-		"Update the globally installed hax CLI (bun or npm)";
+		"Update the globally installed polarish CLI (bun or npm)";
 
 	static override flags = {
 		"no-update-notifier": Flags.boolean({

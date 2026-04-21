@@ -31,17 +31,22 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
  */
 export function getBridgeConfigDir(): string {
 	if (process.platform === "darwin") {
-		return path.join(os.homedir(), "Library", "Application Support", "hax");
+		return path.join(
+			os.homedir(),
+			"Library",
+			"Application Support",
+			"polarish",
+		);
 	}
 
 	if (process.platform === "win32") {
 		const base =
 			process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
-		return path.join(base, "hax");
+		return path.join(base, "polarish");
 	}
 
 	const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
-	return path.join(xdg, "hax");
+	return path.join(xdg, "polarish");
 }
 
 /**

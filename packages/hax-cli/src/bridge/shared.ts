@@ -39,7 +39,7 @@ export function bridgeDebugLog(
 	message: string,
 	data?: unknown,
 ): void {
-	const prefix = `[hax/bridge:${scope}]`;
+	const prefix = `[polarish/bridge:${scope}]`;
 	const timestamp = new Date().toISOString();
 	if (data === undefined) {
 		console.log(timestamp, prefix, message);
@@ -56,7 +56,7 @@ export function bridgeErrorLog(
 	message: string,
 	data?: unknown,
 ): void {
-	const prefix = `[hax/bridge:${scope}]`;
+	const prefix = `[polarish/bridge:${scope}]`;
 	const timestamp = new Date().toISOString();
 	if (data === undefined) {
 		console.error(timestamp, prefix, message);

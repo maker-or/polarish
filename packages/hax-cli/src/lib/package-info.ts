@@ -13,7 +13,7 @@ const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
 };
 
 /**
- * Published package name (e.g. `@hax/cli`) for update checks and `hax update` hints.
+ * Published package name (e.g. `@polarish/cli`) for update checks and `polarish update` hints.
  */
 export const PACKAGE_NAME = pkg.name;
 

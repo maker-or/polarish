@@ -87,8 +87,8 @@ export class McpStdioClient {
 			protocolVersion: MCP_PROTOCOL_VERSION,
 			capabilities: {},
 			clientInfo: {
-				name: "hax-bridge",
-				title: "Hax Bridge MCP client",
+				name: "polarish-bridge",
+				title: "Polarish Bridge MCP client",
 				version: "0.1.0",
 			},
 		});
