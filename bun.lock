@@ -50,10 +50,6 @@
         "zod",
       ],
     },
-    "packages/config": {
-      "name": "@polarish/config",
-      "version": "0.0.0",
-    },
     "packages/polarish-cli": {
       "name": "@polarish/cli",
       "version": "0.1.0",
@@ -230,8 +226,6 @@
     "@polarish/ai": ["@polarish/ai@workspace:packages/ai"],
 
     "@polarish/cli": ["@polarish/cli@workspace:packages/polarish-cli"],
-
-    "@polarish/config": ["@polarish/config@workspace:packages/config"],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.3", "", {}, "sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q=="],
 

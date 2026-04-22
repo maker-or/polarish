@@ -6,10 +6,10 @@
 	"homepage": "https://polarish.dev",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/anomalyco/polarish.git"
+		"url": "https://github.com/maker-or/polarish"
 	},
 	"bugs": {
-		"url": "https://github.com/anomalyco/polarish/issues"
+		"url": "https://github.com/maker-or/polarish/issues"
 	},
 	"keywords": [
 		"cli",
@@ -33,6 +33,9 @@
 			"init": "./dist/hooks/init.js",
 			"postrun": "./dist/hooks/postrun.js"
 		}
+	},
+	"publishConfig": {
+		"access": "public"
 	},
 	"scripts": {
 		"build": "rm -rf dist && tsc -p tsconfig.build.json",
