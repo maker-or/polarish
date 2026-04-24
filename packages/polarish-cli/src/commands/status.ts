@@ -1,6 +1,5 @@
 import { Command, Flags } from "@oclif/core";
 import { readBridgeConfig } from "../lib/bridge-config.js";
-import { loadRepoEnv } from "../lib/env.js";
 import { getBridgeConfigJsonPath } from "../lib/paths.js";
 
 /**
@@ -28,7 +27,6 @@ export default class Status extends Command {
 			process.env.NO_UPDATE_NOTIFIER = "1";
 		}
 
-		loadRepoEnv();
 		const config = await readBridgeConfig();
 		const filePath = getBridgeConfigJsonPath();
 

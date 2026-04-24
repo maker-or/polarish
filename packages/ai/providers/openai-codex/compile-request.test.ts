@@ -98,7 +98,7 @@ describe("compileRequest", () => {
 	test("serializes image attachments for user content", () => {
 		const request: appRequestShape = {
 			provider: "openai-codex",
-			model: "gpt-5.2-codex",
+			model: "gpt-5.2",
 			system: "Look at the image.",
 			stream: false,
 			temperature: 0,
@@ -140,7 +140,7 @@ describe("compileRequest", () => {
 		};
 
 		expect(compileRequest(request)).toEqual({
-			model: "gpt-5.2-codex",
+			model: "gpt-5.2",
 			instructions: "Look at the image.",
 			input: [
 				{
@@ -170,7 +170,7 @@ describe("compileRequest", () => {
 	test("serializes document attachments for user and tool content", () => {
 		const request: appRequestShape = {
 			provider: "openai-codex",
-			model: "gpt-5.2-codex",
+			model: "gpt-5.2",
 			system: "Read the file.",
 			stream: false,
 			temperature: 0,
@@ -219,7 +219,7 @@ describe("compileRequest", () => {
 		};
 
 		expect(compileRequest(request)).toEqual({
-			model: "gpt-5.2-codex",
+			model: "gpt-5.2",
 			instructions: "Read the file.",
 			input: [
 				{

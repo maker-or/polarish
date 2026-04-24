@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import inquirer from "inquirer";
-import ora from "ora";
+import { createSpinner } from "nanospinner";
 
 /**
  * This is one provider option shown in setup prompt.
@@ -218,12 +218,14 @@ async function setupProvider(
 		if (provider === "chatgpt-codex") {
 			const before = await getCodexState();
 			if (!before.installed) {
-				const spinner = ora("Installing ChatGPT Codex CLI...").start();
+				const spinner = createSpinner(
+					"Installing ChatGPT Codex CLI...",
+				).start();
 				try {
 					await installCodex();
-					spinner.succeed("Codex installed.");
+					spinner.success({ text: "Codex installed." });
 				} catch (error) {
-					spinner.fail("Codex install failed.");
+					spinner.error({ text: "Codex install failed." });
 					throw error;
 				}
 			}
@@ -248,12 +250,14 @@ async function setupProvider(
 
 		const before = await getClaudeState();
 		if (!before.installed) {
-			const spinner = ora("Installing Anthropic Claude Code CLI...").start();
+			const spinner = createSpinner(
+				"Installing Anthropic Claude Code CLI...",
+			).start();
 			try {
 				await installClaudeCode();
-				spinner.succeed("Claude Code installed.");
+				spinner.success({ text: "Claude Code installed." });
 			} catch (error) {
-				spinner.fail("Claude Code install failed.");
+				spinner.error({ text: "Claude Code install failed." });
 				throw error;
 			}
 		}

@@ -116,16 +116,11 @@ export const codexFunctionTool = Schema.Struct({
  *  this are the model name that we need to use when sending requests to the codex APIs
  */
 export const CodexModelId = Schema.Literal(
-	"gpt-5.1",
-	"gpt-5.1-codex-max",
-	"gpt-5.1-codex-mini",
 	"gpt-5.2",
-	"gpt-5.2-codex",
 	"gpt-5.3-codex",
 	"gpt-5.3-codex-spark",
 	"gpt-5.4",
 	"gpt-5.4-mini",
-	"gpt-5.4-nano",
 );
 
 /**

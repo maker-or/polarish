@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"description": "Polarish CLI — configure and run the local AI bridge",
 	"type": "module",
-	"homepage": "https://polarish.dev",
+	"homepage": "https://github.com/maker-or/polarish",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/maker-or/polarish"
@@ -11,15 +11,7 @@
 	"bugs": {
 		"url": "https://github.com/maker-or/polarish/issues"
 	},
-	"keywords": [
-		"cli",
-		"polarish",
-		"ai",
-		"bridge",
-		"localhost",
-		"openai",
-		"codex"
-	],
+	"keywords": ["cli", "polarish", "ai", "openai", "codex"],
 	"files": ["bin", "dist", "public"],
 	"bin": {
 		"polarish": "./bin/run.js"
@@ -48,15 +40,14 @@
 		"node": ">=20"
 	},
 	"dependencies": {
-		"@oclif/core": "^4.2.10",
-		"dotenv": "^16.4.7",
-		"inquirer": "^13.4.0",
-		"ora": "^9.3.0",
-		"semver": "^7.7.2"
+		"@oclif/core": "^4.10.5",
+		"inquirer": "^13.4.2",
+		"nanospinner": "^1.2.2",
+		"semver": "^7.7.4"
 	},
 	"devDependencies": {
-		"@types/node": "^24.10.1",
-		"@types/semver": "^7.7.0",
+		"@types/node": "^24.12.2",
+		"@types/semver": "^7.7.1",
 		"typescript": "~5.9.3"
 	}
 }

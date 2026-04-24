@@ -2,6 +2,9 @@
 	"name": "@polarish/ai",
 	"version": "0.1.0",
 	"type": "module",
+	"description": "Open-source SDK for building AI workflows where users bring their own AI subscriptions",
+	"homepage": "https://github.com/maker-or/polarish",
+	"keywords": ["ai-sdk", "polarish", "ai", "claude-code", "codex" , "typescript"],
 	"imports": {
 		"#tool-callback-host": {
 			"types": "./dist/client/tool-callback-host.node.d.ts",
