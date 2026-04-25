@@ -73,11 +73,20 @@ const client = create({
 });
 ```
 
+With this client:
+
+- `client.generate(request)` takes only the request
+- `client.run(request, options)` can take a second options object
+- if you need per-call `endpoint` or `headers` on `generate()`, use the top-level `generate()` export
+
 ---
 
 ## `generate()` single turn
 
 Use this for one request/one response.
+
+When you use the client returned by `create()`, call `client.generate(request)` with just the request.
+If you need per-call `endpoint` or `headers` overrides, use the top-level `generate()` export instead.
 
 ```ts
 const result = await client.generate({
@@ -118,11 +127,34 @@ const final = await stream.final(); // UnifiedResponse
 console.log(final.finishReason);
 ```
 
+### Top-level `generate()` export
+
+If you want to override the endpoint or pass request-level headers, import `generate()` directly:
+
+```ts
+import { generate } from "@polarish/ai";
+
+const result = await generate(
+  {
+    provider: "openai-codex",
+    model: "gpt-5.4",
+    messages: [{ role: "user", content: "Hello" }],
+    stream: false,
+  },
+  {
+    endpoint: "http://127.0.0.1:4318/v1/generate",
+    headers: { Origin: "http://localhost:3001" },
+  },
+);
+```
+
 ---
 
 ## `run()` full agent loop
 
-Use this for complex workflows where model calls tools.
+Use this for complex workflows where the model calls tools.
+
+`client.run(request, options)` accepts a second options object for loop settings like `maxIterations` and forwarded `headers`.
 
 ### Batch run
 
