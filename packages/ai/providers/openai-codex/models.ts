@@ -82,6 +82,22 @@ const rawOpenaiCodex = {
 		contextWindow: 272000,
 		maxTokens: 128000,
 	},
+	"gpt-5.5": {
+		id: "gpt-5.5",
+		name: "GPT-5.5",
+		provider: "openai-codex",
+		baseUrl: "https://chatgpt.com/backend-api",
+		reasoning: true,
+		input: ["text", "attachment"],
+		cost: {
+			input: 5,
+			output: 30,
+			cacheRead: 0.5,
+			cacheWrite: 0,
+		},
+		contextWindow: 272000,
+		maxTokens: 128000,
+	},
 };
 
 export const openaiCodex =
