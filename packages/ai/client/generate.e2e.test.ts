@@ -3,6 +3,7 @@ import type {
 	AppRequestShapeType,
 	UnifiedGenerateResultType,
 } from "../index.ts";
+import { create } from "./create.ts";
 import { generate } from "./generate.ts";
 
 const executeCodexMock = mock(
@@ -224,29 +225,28 @@ describe("generate end-to-end", () => {
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_input, init) => {
 			const body = JSON.parse(String(init?.body));
+			const headers = new Headers(init?.headers);
+
+			expect(headers.get("origin")).toBe("http://localhost:3000");
+
 			return handleBridgeRequest(
 				new Request("http://127.0.0.1:4318/v1/generate", {
 					method: "POST",
-					headers: {
-						"content-type": "application/json",
-						origin: "http://localhost:3000",
-					},
+					headers,
 					body: JSON.stringify(body),
 				}),
 			);
 		}) as typeof globalThis.fetch;
 
 		try {
-			const result = await generate(
-				{
-					...request,
-					stream: false,
-				},
-				{
-					endpoint: "https://example.com/v1/generate",
-					headers: { origin: "http://localhost:3000" },
-				},
-			);
+			const client = create({
+				baseUrl: "https://example.com",
+				origin: "http://localhost:3000",
+			});
+			const result = await client.generate({
+				...request,
+				stream: false,
+			});
 
 			expect(result.stream).toBe(false);
 			if (!result.stream) {

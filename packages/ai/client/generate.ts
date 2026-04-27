@@ -12,9 +12,11 @@ import {
 } from "./codex-tool-callback-request.ts";
 import { consumeUnifiedStream } from "./consume-unified-stream.ts";
 import { aiDebugLog } from "./debug.ts";
+import { buildBridgeHeaders } from "./headers.ts";
 
 type GenerateOptions = {
 	endpoint: string;
+	origin?: string;
 	headers?: Record<string, string>;
 };
 
@@ -64,8 +66,7 @@ export async function generate(
 		});
 
 		const { signal, ...serializableRequest } = bridgedRequest;
-		const headers = new Headers(options.headers);
-		headers.set("content-type", "application/json");
+		const headers = buildBridgeHeaders(options.origin, options.headers);
 		aiDebugLog("generate", "posting to bridge", {
 			endpoint: options.endpoint,
 		});

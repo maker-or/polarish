@@ -117,4 +117,27 @@ describe("create", () => {
 
 		expect(result.stream).toBe(false);
 	});
+
+	test("forwards origin to client generate requests", async () => {
+		globalThis.fetch = (async (input, init) => {
+			const headers = new Headers(init?.headers);
+
+			expect(input).toBe("https://example.com/v1/generate");
+			expect(headers.get("origin")).toBe("https://app.example.com");
+			expect(headers.get("content-type")).toBe("application/json");
+
+			return Response.json(finalResponse);
+		}) as typeof globalThis.fetch;
+
+		const client = create({
+			baseUrl: "https://example.com",
+			origin: " https://app.example.com ",
+		});
+		const result = await client.generate(request);
+
+		expect(result.stream).toBe(false);
+		if (!result.stream) {
+			expect(result.response).toEqual(finalResponse);
+		}
+	});
 });

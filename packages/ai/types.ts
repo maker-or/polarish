@@ -651,7 +651,10 @@ export type CreateUnifiedResponseStreamResult = {
 };
 
 export type CreateClientOptions = {
+	/** This is the bridge base URL that requests are sent to. */
 	baseUrl?: string;
+	/** This is the app origin that Node or Bun callers present to the bridge. */
+	origin?: string;
 };
 
 /**

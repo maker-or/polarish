@@ -5,8 +5,8 @@ import { generate } from "./generate.ts";
 import { run } from "./run.ts";
 import type { RunOptions, RunResult, RunStreamingResult } from "./run.ts";
 
-/** Options for Client.run() — everything except endpoint, which is set by create(). */
-export type ClientRunOptions = Omit<RunOptions, "endpoint">;
+/** Options for Client.run() — transport fields are set by create(). */
+export type ClientRunOptions = Omit<RunOptions, "endpoint" | "origin">;
 
 /**
  * This is the AI client you get from `create()`.
@@ -56,17 +56,22 @@ function resolveEndpoint(baseUrl?: string): string {
 
 export function create(options: CreateClientOptions): Client {
 	const endpoint = resolveEndpoint(options.baseUrl);
+	const origin = options.origin?.trim();
 
 	return {
 		async generate(request: appRequestShape): Promise<UnifiedGenerateResult> {
-			return generate(request, { endpoint });
+			return generate(request, { endpoint, ...(origin ? { origin } : {}) });
 		},
 
 		run(
 			request: appRequestShape,
 			runOptions?: ClientRunOptions,
 		): Promise<RunStreamingResult | RunResult> {
-			return run(request, { ...runOptions, endpoint });
+			return run(request, {
+				...runOptions,
+				endpoint,
+				...(origin ? { origin } : {}),
+			});
 		},
 	} as Client;
 }

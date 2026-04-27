@@ -41,6 +41,8 @@ export type RunTurnEvent = {
 export type RunOptions = {
 	/** Bridge endpoint, e.g. http://127.0.0.1:4318/v1/generate */
 	endpoint: string;
+	/** App origin forwarded to every generate() call in the loop. */
+	origin?: string;
 	/** Extra HTTP headers forwarded to every generate() call in the loop. */
 	headers?: Record<string, string>;
 	/**
@@ -219,6 +221,7 @@ async function runBatch(
 			});
 			const result = await generate(batchRequest, {
 				endpoint: options.endpoint,
+				...(options.origin !== undefined ? { origin: options.origin } : {}),
 				...(options.headers !== undefined ? { headers: options.headers } : {}),
 			});
 
@@ -400,6 +403,7 @@ function runStreaming(
 				});
 				const turnResult = await generate(streamRequest, {
 					endpoint: options.endpoint,
+					...(options.origin !== undefined ? { origin: options.origin } : {}),
 					...(options.headers !== undefined
 						? { headers: options.headers }
 						: {}),

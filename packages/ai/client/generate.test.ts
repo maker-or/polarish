@@ -126,4 +126,49 @@ describe("generate", () => {
 			globalThis.fetch = originalFetch;
 		}
 	});
+
+	test("keeps top-level headers working as a transport escape hatch", async () => {
+		const batchRequest: AppRequestShapeType = {
+			...streamingRequest,
+			stream: false,
+		};
+
+		const finalResponse: UnifiedResponseType = {
+			status: "completed",
+			text: "Header response",
+			content: [{ type: "text", text: "Header response" }],
+			toolCalls: [],
+			approvals: [],
+			finishReason: "stop",
+			warnings: [],
+		};
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (_input, init) => {
+			const headers = new Headers(init?.headers);
+
+			expect(headers.get("origin")).toBe("http://localhost:3001");
+			expect(headers.get("x-request-id")).toBe("req_123");
+			expect(headers.get("content-type")).toBe("application/json");
+
+			return Response.json(finalResponse);
+		}) as typeof globalThis.fetch;
+
+		try {
+			const result = await generate(batchRequest, {
+				endpoint: "https://example.com/v1/chat/completions",
+				headers: {
+					origin: "http://localhost:3001",
+					"x-request-id": "req_123",
+				},
+			});
+
+			expect(result.stream).toBe(false);
+			if (!result.stream) {
+				expect(result.response).toEqual(finalResponse);
+			}
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 });
