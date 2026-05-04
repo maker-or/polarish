@@ -1,6 +1,6 @@
 {
 	"name": "@polarish/ai",
-	"version": "0.2.0",
+	"version": "0.2.2",
 	"type": "module",
 	"description": "Open-source SDK for building AI workflows where users bring their own AI subscriptions",
 	"homepage": "https://github.com/maker-or/polarish",
