@@ -178,6 +178,10 @@ const serializeAssistantTextContent = (
 					return Effect.succeed(toAssistantTextPart(entry.text));
 				case "thinking":
 					return Effect.succeed(toAssistantTextPart(entry.thinking));
+				default:
+					return Effect.dieMessage(
+						"Unexpected content type in assistant message",
+					);
 			}
 		}),
 		Effect.all,
@@ -215,6 +219,8 @@ const serializeUserContent = (
 					return toTextContentPart(entry);
 				case "attachment":
 					return toAttachmentContentPart(entry);
+				default:
+					return Effect.dieMessage("Unexpected content type in user message");
 			}
 		}),
 		Effect.all,
@@ -233,6 +239,8 @@ const serializeToolContent = (
 					return toTextContentPart(entry);
 				case "attachment":
 					return toAttachmentContentPart(entry);
+				default:
+					return Effect.dieMessage("Unexpected content type in tool message");
 			}
 		}),
 		Effect.all,

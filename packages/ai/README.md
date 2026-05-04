@@ -32,13 +32,13 @@ import { create } from "@polarish/ai";
 
 const client = create({
   baseUrl: "http://127.0.0.1:4318",
-  origin: "https://app.example.com",
+  origin: ["https://app.example.com", "http://localhost:3000"],
 });
 ```
 
 `baseUrl` means local bridge URL. This is where `@polarish/ai` sends requests. `@polarish/cli` starts this bridge. Default bridge URL is `http://127.0.0.1:4318`.
 
-`origin` means app identity sent to bridge. Bridge uses it for allowlist checks. Use exact app origin, for example `https://app.example.com`.
+`origin` means app identity sent to bridge. Bridge uses it for allowlist checks. You can pass one origin string or an array of origin strings. During development, add the local server URL where your app runs, for example `http://localhost:3000`, so the bridge can allow requests from your dev app.
 
 After setup:
 
@@ -400,9 +400,10 @@ When streaming, watch `approval_required`.
 
 ---
 
-## Production Checklist
+## Checklist
 
 - use one `client` from `create({ baseUrl, origin })`
+- during development, include your local app server URL in `origin` so the bridge allows requests from your dev app
 - use `client.run()` when tools involved
 - set `maxIterations`
 - give every local tool an `execute`

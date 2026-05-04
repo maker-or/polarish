@@ -56,7 +56,7 @@ const request: AppRequestShapeType = {
 	],
 };
 
-function codexSseResponse(args: {
+function _codexSseResponse(args: {
 	responseId: string;
 	messageId: string;
 	model: string;

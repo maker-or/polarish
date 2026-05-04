@@ -42,7 +42,7 @@ export type RunOptions = {
 	/** Bridge endpoint, e.g. http://127.0.0.1:4318/v1/generate */
 	endpoint: string;
 	/** App origin forwarded to every generate() call in the loop. */
-	origin?: string;
+	origin?: string | string[];
 	/** Extra HTTP headers forwarded to every generate() call in the loop. */
 	headers?: Record<string, string>;
 	/**

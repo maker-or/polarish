@@ -1,5 +1,7 @@
-import type { ResponseStreamEvent } from "openai/resources/responses/responses";
-import type { Response } from "openai/resources/responses/responses";
+import type {
+	Response,
+	ResponseStreamEvent,
+} from "openai/resources/responses/responses";
 import type {
 	CreateUnifiedResponseStreamResult,
 	ProviderMetadata,

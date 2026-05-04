@@ -16,7 +16,7 @@ import { buildBridgeHeaders } from "./headers.ts";
 
 type GenerateOptions = {
 	endpoint: string;
-	origin?: string;
+	origin?: string | string[];
 	headers?: Record<string, string>;
 };
 

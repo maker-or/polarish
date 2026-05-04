@@ -650,11 +650,20 @@ export type CreateUnifiedResponseStreamResult = {
 	controller: UnifiedResponseStreamController;
 };
 
+/**
+ * Options for creating a new AI client.
+ */
 export type CreateClientOptions = {
-	/** This is the bridge base URL that requests are sent to. */
+	/**
+	 * This is the bridge base URL that requests are sent to.
+	 * Defaults to http://127.0.0.1:4318
+	 */
 	baseUrl?: string;
-	/** This is the app origin that Node or Bun callers present to the bridge. */
-	origin?: string;
+	/**
+	 * This is the app origin that Node or Bun callers present to the bridge.
+	 * Can be a single string or an array of strings.
+	 */
+	origin?: string | string[];
 };
 
 /**
