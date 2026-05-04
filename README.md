@@ -7,6 +7,12 @@ Polarsih lets your users bring their own AI subscriptions (Codex, Claude Code, e
 You focus on building workflows.  
 Your users use the AI they already pay for.
 
+# Agent skills
+install the agent skills 
+```bash
+npx skills add maker-or/skills
+```
+
 # How to use
 
 First ask your users to download the polarish cli tool  and run the commnad
@@ -36,4 +42,4 @@ the polarish wrap round the codex and clauade-code so that it is really imporatn
 - codex setup follw this [link](https://developers.openai.com/codex/cli)
 - claude-code setup follow this [link](https://claude.com/product/claude-code)
 
-polarish is heavily inspired from [t3code](https://github.com/pingdotgg/t3code) and [pi-mono](https://github.com/badlogic/pi-mono/) ❤️‍🔥  
+polarish is heavily inspired from [t3code](https://github.com/pingdotgg/t3code) and [pi-mono](https://github.com/badlogic/pi-mono/) ❤️‍🔥
