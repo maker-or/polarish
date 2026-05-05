@@ -5,12 +5,12 @@ import { createSpinner } from "nanospinner";
 /**
  * This is one provider option shown in setup prompt.
  */
-type ProviderId = "chatgpt-codex" | "anthropic-claude-code";
+export type ProviderHarnessId = "chatgpt-codex" | "anthropic-claude-code";
 
 /**
  * This is runtime state for one provider on current machine.
  */
-type ProviderState = {
+export type ProviderHarnessState = {
 	authenticated: boolean;
 	installed: boolean;
 };
@@ -32,7 +32,7 @@ type CommandResult = {
 type ProviderSetupResult = {
 	error?: string;
 	ok: boolean;
-	provider: ProviderId;
+	provider: ProviderHarnessId;
 };
 
 /**
@@ -132,7 +132,7 @@ function isMissingBinary(result: CommandResult): boolean {
 /**
  * This checks Codex installation and auth state by running `codex login status`.
  */
-async function getCodexState(): Promise<ProviderState> {
+async function getCodexState(): Promise<ProviderHarnessState> {
 	const result = await runCommand("codex", ["login", "status"]);
 	if (isMissingBinary(result)) {
 		return { authenticated: false, installed: false };
@@ -153,7 +153,7 @@ async function getCodexState(): Promise<ProviderState> {
 /**
  * This checks Claude Code installation with `claude -v` and auth with `claude auth status`.
  */
-async function getClaudeState(): Promise<ProviderState> {
+async function getClaudeState(): Promise<ProviderHarnessState> {
 	const version = await runCommand("claude", ["-v"]);
 	if (isMissingBinary(version)) {
 		return { authenticated: false, installed: false };
@@ -169,6 +169,18 @@ async function getClaudeState(): Promise<ProviderState> {
 	return {
 		authenticated: status.ok && !notLoggedIn,
 		installed: true,
+	};
+}
+
+/**
+ * This probes Codex and Claude Code CLI install plus login state without opening interactive installers.
+ */
+export async function getProviderHarnessStates(): Promise<
+	Record<ProviderHarnessId, ProviderHarnessState>
+> {
+	return {
+		"anthropic-claude-code": await getClaudeState(),
+		"chatgpt-codex": await getCodexState(),
 	};
 }
 
@@ -212,7 +224,7 @@ async function installCodex(): Promise<void> {
  * It never throws and returns success/failure.
  */
 async function setupProvider(
-	provider: ProviderId,
+	provider: ProviderHarnessId,
 ): Promise<ProviderSetupResult> {
 	try {
 		if (provider === "chatgpt-codex") {
@@ -292,13 +304,13 @@ async function setupProvider(
  * Empty selection is allowed so user can skip setup.
  */
 async function promptProviderSelection(
-	states: Record<ProviderId, ProviderState>,
-): Promise<ProviderId[]> {
+	states: Record<ProviderHarnessId, ProviderHarnessState>,
+): Promise<ProviderHarnessId[]> {
 	const codexState = states["chatgpt-codex"];
 	const claudeState = states["anthropic-claude-code"];
 
 	const { providers } = await inquirer.prompt<{
-		providers: ProviderId[];
+		providers: ProviderHarnessId[];
 	}>([
 		{
 			choices: [
@@ -339,7 +351,7 @@ async function promptProviderSelection(
  * Setup is helper only. It never blocks the rest of CLI.
  */
 export async function ensureHarnessInstalled(): Promise<void> {
-	const states: Record<ProviderId, ProviderState> = {
+	const states: Record<ProviderHarnessId, ProviderHarnessState> = {
 		"anthropic-claude-code": await getClaudeState(),
 		"chatgpt-codex": await getCodexState(),
 	};
@@ -355,7 +367,7 @@ export async function ensureHarnessInstalled(): Promise<void> {
 		"\nSome providers are not ready. You can skip setup and continue.",
 	);
 
-	let selectedProviders: ProviderId[] = [];
+	let selectedProviders: ProviderHarnessId[] = [];
 	try {
 		selectedProviders = await promptProviderSelection(states);
 	} catch {

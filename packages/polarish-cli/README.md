@@ -9,16 +9,16 @@ It has two packages that work in tandem:
 
 To deliver the full end-user experience, you typically use both packages together.
 
-On first run, the CLI checks whether Codex and Claude Code are installed and authenticated. If not, it opens an interactive "Connect your subscriptions" flow to install and log in selected providers in one session.
+Running `**polarish**` with no arguments (or `**polarish connect**`) opens an interactive flow to install and authenticate Codex and/or Claude Code when needed.
 
 The bridge HTTP server ships **inside** this package (`src/bridge/`). Installing `@polarish/cli` is enough; you do not install a separate `@polarish/bridge` package.
 
 ## Common commands
 
 ```bash
+polarish
 polarish status
 polarish bridge run
-polarish origins list
 polarish origins add https://app.example.com
 polarish origins remove https://app.example.com
 ```
@@ -28,16 +28,17 @@ polarish origins remove https://app.example.com
 ```bash
 bun add -g @polarish/cli
 ```
+
 ```bash
 bun add @polarish/ai
 ```
 
 ## Important first step
 
-After installing the package, you must run:
+After installing the package, run:
 
 ```bash
 polarish
 ```
 
-This first run is required. It will guide you through installing and authenticating Codex and/or Claude Code.
+This guides you through installing and authenticating Codex and/or Claude Code. Use `**polarish status**` to see bridge settings, allowed browser origins, and which providers are connected.

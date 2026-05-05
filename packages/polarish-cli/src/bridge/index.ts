@@ -18,4 +18,8 @@ export {
 } from "./errors.js";
 export type { BridgeErrorPayload } from "./errors.js";
 export { handleBridgeRequest, startBridgeServer } from "./server.js";
-export { isAllowedOrigin, isLocalhostOrigin } from "./security.js";
+export {
+	IMPLICIT_LOOPBACK_BROWSER_ORIGIN_HOSTS,
+	isAllowedOrigin,
+	isLocalhostOrigin,
+} from "./security.js";

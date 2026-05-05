@@ -5,10 +5,10 @@ import { execute } from "@oclif/core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** When no subcommand is given, show the local bridge status. */
+/** When no subcommand is given, open interactive subscription setup (Codex / Claude Code). */
 const passthrough = process.argv.slice(2);
 if (passthrough.length === 0) {
-	process.argv.push("status");
+	process.argv.push("connect");
 }
 
 await execute({

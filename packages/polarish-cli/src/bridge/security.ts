@@ -1,4 +1,15 @@
 /**
+ * Hostnames that are always allowed as browser `Origin` values without listing them in `bridge.json`.
+ * Keep this aligned with {@link isLocalhostOrigin} logic.
+ */
+export const IMPLICIT_LOOPBACK_BROWSER_ORIGIN_HOSTS: readonly string[] = [
+	"localhost",
+	"127.0.0.1",
+	"[::1]",
+	"::1",
+];
+
+/**
  * This tells us if an origin points at a localhost browser context.
  */
 export function isLocalhostOrigin(origin: string): boolean {
