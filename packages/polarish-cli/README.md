@@ -13,6 +13,21 @@ Running `polarish` with no arguments (or `polarish connect`) opens an interactiv
 
 After you change allowed origins with `polarish origins add` or `remove`, the running bridge reloads `bridge.json` on each request—no restart needed for new origins. If you change the listen **port** in config, stop `polarish bridge run` (or your autostart job) and start it again so the server can bind the new port.
 
+## Provider CLI paths (`spawn … ENOENT`)
+
+If Codex or Claude works in your terminal but requests fail with `codex_not_installed` / `spawn codex ENOENT`, the bridge often runs with a **smaller `PATH`** than your shell (launchd, systemd user service, etc.). Set absolute binaries in `bridge.json`:
+
+```json
+{
+  "runtime": {
+    "codexPath": "/Users/you/.bun/bin/codex",
+    "claudePath": "/usr/local/bin/claude"
+  }
+}
+```
+
+Or set **`POLARISH_CODEX_PATH`** / **`POLARISH_CLAUDE_PATH`** in the environment of the bridge process. **`polarish status`** prints the resolved executable strings under **CLI executables resolved for bridge requests**.
+
 The bridge HTTP server ships **inside** this package (`src/bridge/`). Installing `@polarish/cli` is enough; you do not install a separate `@polarish/bridge` package.
 
 ## Common commands

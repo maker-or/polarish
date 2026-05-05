@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import readline from "node:readline";
 import { promisify } from "node:util";
+import { DEFAULT_BRIDGE_CONFIG } from "../lib/bridge-config.js";
 import {
 	type AppRequestShapeType,
 	type ResponseContentPartType,
@@ -12,6 +13,7 @@ import {
 	unifiedResponseForStreamError,
 } from "./contracts.js";
 import { BridgeError } from "./errors.js";
+import { resolveClaudeExecutable } from "./executable-paths.js";
 import {
 	type AdapterAvailability,
 	type ExecuteContext,
@@ -69,12 +71,15 @@ type ClaudeRunState = {
 
 /**
  * This checks whether Claude Code is installed and logged in on the local machine.
+ * Pass the resolved executable path from bridge requests; omit only for diagnostics (uses bridge.json / env / PATH defaults).
  */
-export async function checkClaudeCodeAvailability(): Promise<AdapterAvailability> {
+export async function checkClaudeCodeAvailability(
+	claudeExecutable: string = resolveClaudeExecutable(DEFAULT_BRIDGE_CONFIG),
+): Promise<AdapterAvailability> {
 	try {
-		const version = await execFileAsync("claude", ["--version"]);
+		const version = await execFileAsync(claudeExecutable, ["--version"]);
 		try {
-			const status = await execFileAsync("claude", ["auth", "status"]);
+			const status = await execFileAsync(claudeExecutable, ["auth", "status"]);
 			const detail = [
 				version.stdout,
 				version.stderr,
@@ -135,15 +140,24 @@ export async function executeClaudeCode(
 		});
 	}
 
-	const availability = await checkClaudeCodeAvailability();
-	logger.log("claude availability checked", availability);
+	const claudeExecutable = context.claudeExecutable;
+	const availability = await checkClaudeCodeAvailability(claudeExecutable);
+	logger.log("claude availability checked", {
+		...availability,
+		claudeExecutable,
+	});
 	if (!availability.installed) {
+		const isENOENT =
+			availability.detail?.includes("ENOENT") === true ||
+			availability.detail?.includes("spawn ") === true;
 		throw new BridgeError({
 			status: 503,
 			code: "claude_code_not_installed",
 			message: "Claude Code is not installed on this machine.",
 			detail: availability.detail,
-			suggestedAction: "Install the Claude Code CLI and retry the request.",
+			suggestedAction: isENOENT
+				? "Install the Claude Code CLI, or set POLARISH_CLAUDE_PATH / runtime.claudePath in bridge.json to the full path to the claude binary (needed when the bridge runs with a minimal PATH, e.g. launchd/systemd)."
+				: "Install the Claude Code CLI and retry the request.",
 			metadata: {
 				provider: request.provider,
 			},
@@ -170,7 +184,7 @@ export async function executeClaudeCode(
 	const queue = createEventQueue();
 	const state = createRunState(request);
 	const args = buildClaudeCodeArgs(request);
-	const child = spawn("claude", args, {
+	const child = spawn(claudeExecutable, args, {
 		stdio: ["ignore", "pipe", "pipe"],
 		shell: process.platform === "win32",
 	});

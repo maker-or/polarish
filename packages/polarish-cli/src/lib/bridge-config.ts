@@ -12,6 +12,13 @@ export type BridgeConfig = {
 	security: {
 		allowedOrigins: string[];
 	};
+	/**
+	 * Optional absolute paths to provider CLIs when the bridge runs with a minimal PATH (e.g. launchd/systemd).
+	 */
+	runtime?: {
+		codexPath?: string;
+		claudePath?: string;
+	};
 };
 
 /**
@@ -25,6 +32,29 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
 		allowedOrigins: [],
 	},
 };
+
+/**
+ * This merges persisted `runtime` paths from disk into the normalized config shape.
+ */
+export function mergeRuntimePartial(
+	input: Partial<NonNullable<BridgeConfig["runtime"]>> | undefined,
+): BridgeConfig["runtime"] | undefined {
+	if (!input) {
+		return undefined;
+	}
+	const codexPath =
+		typeof input.codexPath === "string" ? input.codexPath.trim() : "";
+	const claudePath =
+		typeof input.claudePath === "string" ? input.claudePath.trim() : "";
+	const out: NonNullable<BridgeConfig["runtime"]> = {};
+	if (codexPath.length > 0) {
+		out.codexPath = codexPath;
+	}
+	if (claudePath.length > 0) {
+		out.claudePath = claudePath;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /**
  * This reads the local bridge config and falls back to defaults when missing.
@@ -56,6 +86,7 @@ export async function writeBridgeConfig(config: BridgeConfig): Promise<void> {
 export function mergeBridgeConfig(
 	input: Partial<BridgeConfig> | undefined,
 ): BridgeConfig {
+	const runtime = mergeRuntimePartial(input?.runtime);
 	return {
 		server: {
 			port:
@@ -71,6 +102,7 @@ export function mergeBridgeConfig(
 					)
 				: [...DEFAULT_BRIDGE_CONFIG.security.allowedOrigins],
 		},
+		...(runtime ? { runtime } : {}),
 	};
 }
 

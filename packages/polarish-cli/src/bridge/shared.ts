@@ -19,6 +19,10 @@ export type ExecuteContext = {
 	requestId: string;
 	signal?: AbortSignal;
 	transport: "sse";
+	/** Resolved Codex CLI path or command name (from bridge.json / env / default). */
+	codexExecutable: string;
+	/** Resolved Claude Code CLI path or command name. */
+	claudeExecutable: string;
 };
 
 /**

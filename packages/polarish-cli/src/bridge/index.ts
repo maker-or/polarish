@@ -24,3 +24,7 @@ export {
 	isLocalhostOrigin,
 	tokenizeOriginHeader,
 } from "./security.js";
+export {
+	resolveClaudeExecutable,
+	resolveCodexExecutable,
+} from "./executable-paths.js";

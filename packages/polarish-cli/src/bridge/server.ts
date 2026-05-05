@@ -15,8 +15,16 @@ import {
 	unifiedResponseForStreamError,
 } from "./contracts.js";
 import { BridgeError, bridgeErrorResponse } from "./errors.js";
+import {
+	resolveClaudeExecutable,
+	resolveCodexExecutable,
+} from "./executable-paths.js";
 import { isAllowedOrigin, isLocalhostToolCallbackUrl } from "./security.js";
-import { createBridgeRequestLogger, summarizeAppRequest } from "./shared.js";
+import {
+	type ExecuteContext,
+	createBridgeRequestLogger,
+	summarizeAppRequest,
+} from "./shared.js";
 
 function corsHeaders(origin: string | null, config: BridgeConfig): HeadersInit {
 	if (!isAllowedOrigin(origin, config.security.allowedOrigins)) {
@@ -133,6 +141,8 @@ export async function handleBridgeRequest(
 			requestId,
 			signal: request.signal,
 			transport: "sse",
+			codexExecutable: resolveCodexExecutable(config),
+			claudeExecutable: resolveClaudeExecutable(config),
 		});
 		logger.log("provider execution completed", {
 			stream: result.stream,
@@ -316,11 +326,7 @@ function parseGenerateRequest(body: unknown): AppRequestShapeType {
  */
 async function executeProviderRequest(
 	request: AppRequestShapeType,
-	context: {
-		requestId: string;
-		signal?: AbortSignal;
-		transport: "sse";
-	},
+	context: ExecuteContext,
 ): Promise<UnifiedGenerateResultType> {
 	switch (request.provider) {
 		case "openai-codex":

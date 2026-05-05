@@ -1,4 +1,8 @@
 import { Command, Flags } from "@oclif/core";
+import {
+	resolveClaudeExecutable,
+	resolveCodexExecutable,
+} from "../bridge/executable-paths.js";
 import { IMPLICIT_LOOPBACK_BROWSER_ORIGIN_HOSTS } from "../bridge/security.js";
 import type { BridgeConfig } from "../lib/bridge-config.js";
 import { readBridgeConfig } from "../lib/bridge-config.js";
@@ -22,6 +26,9 @@ export type StatusJsonOutput = {
 		"anthropic-claude-code": ProviderHarnessState;
 		"chatgpt-codex": ProviderHarnessState;
 	};
+	/** Paths passed to exec/spawn for each provider after applying bridge.json + env overrides. */
+	resolvedClaudeExecutable: string;
+	resolvedCodexExecutable: string;
 };
 
 /**
@@ -67,6 +74,8 @@ export default class Status extends Command {
 		const filePath = getBridgeConfigJsonPath();
 		const configuredOrigins = [...config.security.allowedOrigins];
 		const providers = await getProviderHarnessStates();
+		const resolvedCodexExecutable = resolveCodexExecutable(config);
+		const resolvedClaudeExecutable = resolveClaudeExecutable(config);
 
 		const payload: StatusJsonOutput = {
 			config,
@@ -76,6 +85,8 @@ export default class Status extends Command {
 				implicitLoopbackBrowserHosts: IMPLICIT_LOOPBACK_BROWSER_ORIGIN_HOSTS,
 			},
 			providers,
+			resolvedClaudeExecutable,
+			resolvedCodexExecutable,
 		};
 
 		if (flags.json) {
@@ -85,6 +96,11 @@ export default class Status extends Command {
 
 		this.log(`Bridge config: ${filePath}`);
 		this.log(`Port: ${config.server.port}`);
+
+		this.log("");
+		this.log("CLI executables resolved for bridge requests:");
+		this.log(`  Codex: ${resolvedCodexExecutable}`);
+		this.log(`  Claude Code: ${resolvedClaudeExecutable}`);
 
 		this.log("");
 		this.log(

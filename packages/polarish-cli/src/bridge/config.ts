@@ -1,33 +1,21 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+	type BridgeConfig,
+	DEFAULT_BRIDGE_CONFIG,
+	mergeBridgeConfig,
+} from "../lib/bridge-config.js";
+
+export type { BridgeConfig } from "../lib/bridge-config.js";
+export {
+	DEFAULT_BRIDGE_CONFIG,
+	mergeBridgeConfig,
+	mergeRuntimePartial,
+} from "../lib/bridge-config.js";
 
 /**
- * This is the local bridge config shape that we persist on disk.
- */
-export type BridgeConfig = {
-	server: {
-		port: number;
-	};
-	security: {
-		allowedOrigins: string[];
-	};
-};
-
-/**
- * This is the default bridge config used when no file exists yet.
- */
-export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
-	server: {
-		port: 4318,
-	},
-	security: {
-		allowedOrigins: [],
-	},
-};
-
-/**
- * This returns the OS-specific config directory for the bridge.
+ * This returns the OS-specific config directory for the bridge (alternate legacy layout).
  */
 export function getBridgeConfigDir(): string {
 	if (process.platform === "darwin") {
@@ -79,28 +67,4 @@ export async function writeBridgeConfig(config: BridgeConfig): Promise<void> {
 		encoding: "utf8",
 		mode: 0o600,
 	});
-}
-
-/**
- * This normalizes partial config input into the full bridge config shape.
- */
-export function mergeBridgeConfig(
-	input: Partial<BridgeConfig> | undefined,
-): BridgeConfig {
-	return {
-		server: {
-			port:
-				typeof input?.server?.port === "number" &&
-				Number.isFinite(input.server.port)
-					? input.server.port
-					: DEFAULT_BRIDGE_CONFIG.server.port,
-		},
-		security: {
-			allowedOrigins: Array.isArray(input?.security?.allowedOrigins)
-				? input.security.allowedOrigins.filter(
-						(origin): origin is string => typeof origin === "string",
-					)
-				: [...DEFAULT_BRIDGE_CONFIG.security.allowedOrigins],
-		},
-	};
 }

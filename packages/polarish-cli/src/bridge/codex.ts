@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import readline from "node:readline";
 import { promisify } from "node:util";
+import { DEFAULT_BRIDGE_CONFIG } from "../lib/bridge-config.js";
 import {
 	type AppRequestShapeType,
 	type ResponseContentPartType,
@@ -12,6 +13,7 @@ import {
 	unifiedResponseForStreamError,
 } from "./contracts.js";
 import { BridgeError } from "./errors.js";
+import { resolveCodexExecutable } from "./executable-paths.js";
 import {
 	type CodexDynamicToolSpec,
 	McpBridgeRegistry,
@@ -86,11 +88,14 @@ type CodexInputItem =
 
 /**
  * This checks whether Codex is installed and logged in on the local machine.
+ * Pass the resolved executable path from bridge requests; omit argument only for diagnostics (uses bridge.json / env / PATH defaults).
  */
-export async function checkCodexAvailability(): Promise<AdapterAvailability> {
+export async function checkCodexAvailability(
+	codexExecutable: string = resolveCodexExecutable(DEFAULT_BRIDGE_CONFIG),
+): Promise<AdapterAvailability> {
 	try {
-		const version = await execFileAsync("codex", ["--version"]);
-		const status = await execFileAsync("codex", ["login", "status"]);
+		const version = await execFileAsync(codexExecutable, ["--version"]);
+		const status = await execFileAsync(codexExecutable, ["login", "status"]);
 		const detail = [
 			version.stdout,
 			version.stderr,
@@ -135,15 +140,24 @@ export async function executeCodex(
 	const logger = createBridgeRequestLogger(context.requestId, "codex");
 	logger.log("codex execution start", summarizeAppRequest(request));
 
-	const availability = await checkCodexAvailability();
-	logger.log("codex availability checked", availability);
+	const codexExecutable = context.codexExecutable;
+	const availability = await checkCodexAvailability(codexExecutable);
+	logger.log("codex availability checked", {
+		...availability,
+		codexExecutable,
+	});
 	if (!availability.installed) {
+		const isENOENT =
+			availability.detail?.includes("ENOENT") === true ||
+			availability.detail?.includes("spawn ") === true;
 		throw new BridgeError({
 			status: 503,
 			code: "codex_not_installed",
 			message: "Codex is not installed on this machine.",
 			detail: availability.detail,
-			suggestedAction: "Install the Codex CLI and retry the request.",
+			suggestedAction: isENOENT
+				? "Install the Codex CLI, or set POLARISH_CODEX_PATH / runtime.codexPath in bridge.json to the full path to the codex binary (needed when the bridge runs with a minimal PATH, e.g. launchd/systemd)."
+				: "Install the Codex CLI and retry the request.",
 			metadata: {
 				provider: request.provider,
 			},
@@ -184,7 +198,7 @@ export async function executeCodex(
 	}
 
 	const queue = createEventQueue();
-	const child = spawn("codex", ["app-server"], {
+	const child = spawn(codexExecutable, ["app-server"], {
 		stdio: ["pipe", "pipe", "pipe"],
 		shell: process.platform === "win32",
 	});
