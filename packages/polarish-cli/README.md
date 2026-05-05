@@ -9,7 +9,9 @@ It has two packages that work in tandem:
 
 To deliver the full end-user experience, you typically use both packages together.
 
-Running `**polarish**` with no arguments (or `**polarish connect**`) opens an interactive flow to install and authenticate Codex and/or Claude Code when needed.
+Running `polarish` with no arguments (or `polarish connect`) opens an interactive flow to install and authenticate Codex and/or Claude Code when needed.
+
+After you change allowed origins with `polarish origins add` or `remove`, the running bridge reloads `bridge.json` on each request—no restart needed for new origins. If you change the listen **port** in config, stop `polarish bridge run` (or your autostart job) and start it again so the server can bind the new port.
 
 The bridge HTTP server ships **inside** this package (`src/bridge/`). Installing `@polarish/cli` is enough; you do not install a separate `@polarish/bridge` package.
 
@@ -41,4 +43,4 @@ After installing the package, run:
 polarish
 ```
 
-This guides you through installing and authenticating Codex and/or Claude Code. Use `**polarish status**` to see bridge settings, allowed browser origins, and which providers are connected.
+This guides you through installing and authenticating Codex and/or Claude Code. Use `polarish status` to see bridge settings, allowed browser origins, and which providers are connected.

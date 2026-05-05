@@ -4,6 +4,7 @@ import {
 	type ServerResponse,
 	createServer,
 } from "node:http";
+import { readBridgeConfig } from "../lib/bridge-config.js";
 import { executeClaudeCode } from "./claude-code.js";
 import { executeCodex } from "./codex.js";
 import { type BridgeConfig, DEFAULT_BRIDGE_CONFIG } from "./config.js";
@@ -163,19 +164,20 @@ export async function handleBridgeRequest(
 }
 
 /**
- * This starts the Node.js HTTP bridge server on the configured port.
+ * This starts the Node HTTP bridge. The listen port is taken from `listenConfig` once; security allowlist and related settings are re-read from disk on every request so origin changes apply without restarting the process.
  */
 export function startBridgeServer(
-	config: BridgeConfig = DEFAULT_BRIDGE_CONFIG,
+	listenConfig: BridgeConfig = DEFAULT_BRIDGE_CONFIG,
 ) {
 	const server = createServer(async (req, res) => {
+		const liveConfig = await readBridgeConfig();
 		const response = await handleBridgeRequest(
 			await nodeRequestToFetchRequest(req),
-			config,
+			liveConfig,
 		);
 		await writeFetchResponse(res, response);
 	});
-	server.listen(config.server.port);
+	server.listen(listenConfig.server.port);
 	return server;
 }
 
