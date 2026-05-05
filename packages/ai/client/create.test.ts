@@ -140,4 +140,60 @@ describe("create", () => {
 			expect(result.response).toEqual(finalResponse);
 		}
 	});
+
+	test("splits comma-separated origin string into multiple header values", async () => {
+		globalThis.fetch = (async (input, init) => {
+			const headers = new Headers(init?.headers);
+
+			expect(input).toBe("https://example.com/v1/generate");
+			expect(headers.get("origin")).toBe(
+				"https://app.example.com http://localhost:3000",
+			);
+
+			return Response.json(finalResponse);
+		}) as typeof globalThis.fetch;
+
+		const client = create({
+			baseUrl: "https://example.com",
+			origin: "https://app.example.com, http://localhost:3000",
+		});
+
+		expect(client.origin).toEqual([
+			"https://app.example.com",
+			"http://localhost:3000",
+		]);
+
+		await client.generate(request);
+	});
+
+	test("splits whitespace-separated origin string into multiple entries", async () => {
+		globalThis.fetch = (async (_input, init) => {
+			const headers = new Headers(init?.headers);
+			expect(headers.get("origin")).toBe("https://a.example https://b.example");
+			return Response.json(finalResponse);
+		}) as typeof globalThis.fetch;
+
+		const client = create({
+			baseUrl: "https://example.com",
+			origin: "  https://a.example   https://b.example  ",
+		});
+
+		expect(client.origin).toEqual(["https://a.example", "https://b.example"]);
+		await client.generate(request);
+	});
+
+	test("normalizes single-entry arrays to a plain origin string on the client", async () => {
+		globalThis.fetch = (async (_input, init) => {
+			expect(new Headers(init?.headers).get("origin")).toBe("https://only.one");
+			return Response.json(finalResponse);
+		}) as typeof globalThis.fetch;
+
+		const client = create({
+			baseUrl: "https://example.com",
+			origin: ["  https://only.one "],
+		});
+
+		expect(client.origin).toBe("https://only.one");
+		await client.generate(request);
+	});
 });

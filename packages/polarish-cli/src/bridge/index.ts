@@ -22,4 +22,5 @@ export {
 	IMPLICIT_LOOPBACK_BROWSER_ORIGIN_HOSTS,
 	isAllowedOrigin,
 	isLocalhostOrigin,
+	tokenizeOriginHeader,
 } from "./security.js";

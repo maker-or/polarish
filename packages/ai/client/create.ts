@@ -70,13 +70,57 @@ function resolveEndpoint(baseUrl?: string): string {
 }
 
 /**
+ * This turns create() `origin` input into a single URL string or a list.
+ * Comma-separated and whitespace-separated strings become multiple entries; arrays are trimmed and empties dropped.
+ */
+function normalizeClientOrigin(
+	origin: CreateClientOptions["origin"],
+): string | string[] | undefined {
+	if (origin === undefined) {
+		return undefined;
+	}
+
+	if (Array.isArray(origin)) {
+		const parts = origin
+			.map((entry) => String(entry).trim())
+			.filter((entry) => entry.length > 0);
+		if (parts.length === 0) {
+			return undefined;
+		}
+		if (parts.length === 1) {
+			return parts[0];
+		}
+		return parts;
+	}
+
+	const raw = String(origin).trim();
+	if (raw.length === 0) {
+		return undefined;
+	}
+
+	const parts = raw
+		.replaceAll(",", " ")
+		.split(/\s+/)
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+
+	if (parts.length === 0) {
+		return undefined;
+	}
+	if (parts.length === 1) {
+		return parts[0];
+	}
+	return parts;
+}
+
+/**
  * Creates a new AI client for interacting with the Polarish bridge.
  * @param options - Options for the client, including baseUrl and origin.
  * @returns A Client object with generate and run methods.
  */
 export function create(options: CreateClientOptions): Client {
 	const endpoint = resolveEndpoint(options.baseUrl);
-	const origin = options.origin;
+	const origin = normalizeClientOrigin(options.origin);
 
 	return {
 		endpoint,

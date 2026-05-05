@@ -5,5 +5,6 @@
 		"noEmit": true,
 		"baseUrl": "."
 	},
-	"include": ["src/**/*.ts", "bin/**/*.ts"]
+	"include": ["src/**/*.ts", "bin/**/*.ts"],
+	"exclude": ["src/**/*.test.ts"]
 }

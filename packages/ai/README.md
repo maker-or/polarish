@@ -38,7 +38,7 @@ const client = create({
 
 `baseUrl` means local bridge URL. This is where `@polarish/ai` sends requests. `@polarish/cli` starts this bridge. Default bridge URL is `http://127.0.0.1:4318`.
 
-`origin` means app identity sent to bridge. Bridge uses it for allowlist checks. You can pass one origin string or an array of origin strings. During development, add the local server URL where your app runs, for example `http://localhost:3000`, so the bridge can allow requests from your dev app.
+`origin` means app identity sent to bridge. Bridge uses it for allowlist checks. Pass one URL string, several URLs separated by commas and/or spaces in one string, or a `string[]`. During development, add the local server URL where your app runs, for example `http://localhost:3000`, so the bridge can allow requests from your dev app.
 
 After setup:
 

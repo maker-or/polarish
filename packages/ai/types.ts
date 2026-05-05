@@ -661,7 +661,7 @@ export type CreateClientOptions = {
 	baseUrl?: string;
 	/**
 	 * This is the app origin that Node or Bun callers present to the bridge.
-	 * Can be a single string or an array of strings.
+	 * Pass one origin string, several origins as `string[]`, or one string with entries separated by commas and/or whitespace (trimmed and split before sending).
 	 */
 	origin?: string | string[];
 };

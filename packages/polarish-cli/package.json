@@ -33,6 +33,7 @@
 	"scripts": {
 		"build": "rm -rf dist && tsc -p tsconfig.build.json",
 		"lint": "biome check .",
+		"test": "bun test src",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"prepack": "bun run build"
 	},
